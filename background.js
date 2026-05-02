@@ -72,6 +72,26 @@ function persistState() {
     chrome.storage.local.set({ sw_recordedEvents: recordedEvents, sw_isRecording: isRecording });
 }
 
+// Track navigation during recording (to capture address bar changes)
+chrome.webNavigation.onCommitted.addListener((details) => {
+    if (isRecording && details.frameId === 0) {
+        // Only record if it's a top-level navigation and we don't have a recent navigate event for this URL
+        const lastEvent = recordedEvents[recordedEvents.length - 1];
+        if (!lastEvent || (lastEvent.action !== 'navigate' || lastEvent.url !== details.url)) {
+            if (!details.url.startsWith('chrome://')) {
+                recordedEvents.push({
+                    action: 'navigate',
+                    url: details.url,
+                    recordedAt: Date.now(),
+                    pageUrl: details.url,
+                    metadata: { url: details.url, timestamp: Date.now() }
+                });
+                persistState();
+            }
+        }
+    }
+});
+
 // ============ MESSAGE LISTENER ============
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('Message Received:', message.type);
@@ -86,21 +106,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             recordedEvents = [];
             automationProgress = null;
             chrome.storage.local.remove('vibathon_resume_steps');
-            
-            // Capture initial navigation so the first step isn't missed
-            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                if (tabs[0]?.url && !tabs[0].url.startsWith('chrome://')) {
-                    recordedEvents.push({
-                        action: 'navigate',
-                        url: tabs[0].url,
-                        recordedAt: Date.now(),
-                        pageUrl: tabs[0].url,
-                        metadata: { url: tabs[0].url, timestamp: Date.now() }
-                    });
-                    persistState();
-                }
-            });
-
+            persistState();
             broadcastToTabs({ type: "START_RECORDING" });
             sendResponse({ success: true });
             break;
@@ -114,6 +120,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case "RECORD_EVENT":
             if (isRecording && message.event) {
+                // If this is the FIRST event and it's not a navigate, prepend current URL
+                if (recordedEvents.length === 0 && message.event.action !== 'navigate') {
+                    const currentUrl = sender.tab?.url;
+                    if (currentUrl && !currentUrl.startsWith('chrome://')) {
+                        recordedEvents.push({
+                            action: 'navigate',
+                            url: currentUrl,
+                            recordedAt: Date.now() - 1, // Ensure it comes first
+                            pageUrl: currentUrl,
+                            metadata: { url: currentUrl, timestamp: Date.now() - 1 }
+                        });
+                    }
+                }
+
                 const event = {
                     ...message.event,
                     recordedAt: Date.now(),

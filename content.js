@@ -411,6 +411,7 @@ async function runAutomation(steps) {
   // Report progress
   function reportProgress(stepIdx, total, desc, status) {
     try {
+      showAutomationDashboard(stepIdx, total, desc, status);
       chrome.runtime.sendMessage({
         type: 'AUTOMATION_PROGRESS',
         stepIndex: stepIdx, totalSteps: total,
@@ -578,6 +579,7 @@ async function executeStepAction(step, stepIdx, el) {
 
       case 'scroll':
         window.scrollBy(0, step.value || 300);
+        await new Promise(r => setTimeout(r, 500));
         return true;
 
       default:
@@ -631,21 +633,71 @@ function highlightElement(el) {
   setTimeout(() => { el.style.outline = orig; el.style.boxShadow = origShadow; }, 1500);
 }
 
+function showAutomationDashboard(stepIdx, total, description, status) {
+  let dashboard = document.getElementById('vibathon-automation-dashboard');
+  if (!dashboard) {
+    dashboard = document.createElement('div');
+    dashboard.id = 'vibathon-automation-dashboard';
+    dashboard.style.cssText = `
+      position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+      z-index: 2147483647; width: 480px; background: rgba(13, 17, 23, 0.9);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 20px;
+      padding: 20px 24px; color: white; font-family: 'Outfit', sans-serif;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.6); display: flex; flex-direction: column;
+      gap: 14px; animation: vbslideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+      pointer-events: none;
+    `;
+    document.body.appendChild(dashboard);
+    
+    if (!document.getElementById('vibathon-global-styles')) {
+      const style = document.createElement('style');
+      style.id = 'vibathon-global-styles';
+      style.innerHTML = `
+        @keyframes vbslideUp { from { transform: translate(-50%, 120px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+        @keyframes vbpulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+        .vbab-progress-bg { width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; }
+        .vbab-progress-fill { height: 100%; background: linear-gradient(90deg, #6366f1, #a855f7); transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+      `;
+      document.head.appendChild(style);
+    }
+  }
+  
+  if (status === 'complete') {
+    setTimeout(() => {
+        dashboard.style.transition = 'all 0.5s ease';
+        dashboard.style.opacity = '0';
+        dashboard.style.transform = 'translate(-50%, 40px)';
+        setTimeout(() => dashboard.remove(), 500);
+    }, 3000);
+  }
+
+  const pct = Math.min(100, Math.round((stepIdx / total) * 100));
+  const statusColor = status === 'running' ? '#10b981' : (status === 'navigating' ? '#f59e0b' : '#6366f1');
+  
+  dashboard.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="width:10px; height:10px; background:${statusColor}; border-radius:50%; box-shadow: 0 0 12px ${statusColor}; animation: vbpulse 1.5s infinite;"></div>
+        <span style="font-weight:700; font-size:0.85rem; letter-spacing:0.08em; color:rgba(255,255,255,0.9);">${status === 'complete' ? 'AUTOMATION FINISHED' : 'VIBATHON AI ACTIVE'}</span>
+      </div>
+      <span style="font-size:0.8rem; font-weight:600; color:rgba(255,255,255,0.5);">${status === 'complete' ? total : stepIdx} / ${total}</span>
+    </div>
+    <div style="font-size:1.15rem; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; letter-spacing:-0.01em;">${description}</div>
+    <div class="vbab-progress-bg"><div class="vbab-progress-fill" style="width:${pct}%"></div></div>
+  `;
+}
+
 function showIndicator(type) {
+  if (type === 'automating') return; // We use the dashboard now
   hideIndicator();
   const div = document.createElement('div');
   div.id = 'vibathon-status-indicator';
   div.style.cssText = 'position:fixed;top:20px;right:20px;z-index:999999;padding:12px 24px;border-radius:30px;color:white;font-weight:bold;font-family:sans-serif;box-shadow:0 10px 30px rgba(0,0,0,0.3);display:flex;align-items:center;gap:10px;transition:all 0.3s ease;';
   if (type === 'recording') {
     div.style.background = '#ff4757';
-    div.innerHTML = '<span style="width:12px;height:12px;background:white;border-radius:50%;animation:vbpulse 1s infinite;"></span> Recording';
-  } else {
-    div.style.background = 'linear-gradient(135deg, #6c63ff, #a855f7)';
-    div.innerHTML = '<span>🚀</span> Automating...';
+    div.innerHTML = '<span style="width:12px;height:12px;background:white;border-radius:50%;animation:vbpulse 1s infinite;"></span> Recording Activity';
   }
-  const style = document.createElement('style');
-  style.innerHTML = '@keyframes vbpulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }';
-  document.head.appendChild(style);
   document.body.appendChild(div);
 }
 
