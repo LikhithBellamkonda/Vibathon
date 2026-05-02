@@ -484,7 +484,11 @@ Return ONLY this JSON:
 async function generateWorkflowFromPrompt(promptText) {
     if (!promptText || promptText.trim() === '') return { error: 'Empty prompt.' };
 
-    let steps = [];
+    // Get context of current page if possible
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = tabs[0];
+    const pageContext = (activeTab && activeTab.url?.startsWith('http')) ? `\nCurrent Page Context (User is currently looking at):\nURL: ${activeTab.url}\nTitle: ${activeTab.title}` : "";
+
     const apiKey = await getApiKey();
     if (!apiKey) return { error: 'No API Key configured.' };
 
@@ -495,23 +499,40 @@ async function generateWorkflowFromPrompt(promptText) {
         try {
             const url = CONFIG.API_URL.replace(/gemini-[a-zA-Z0-9.\-]+(?=:)/, model);
             const promptPayload = {
-                contents: [{ parts: [{ text: `You are an AI browser automation expert. The user wants to build a web automation workflow based on this prompt: "${promptText}"
+                contents: [{ parts: [{ text: `You are an AI browser automation expert. The user wants to build a web automation workflow based on this prompt: "${promptText}" ${pageContext}
 
 Generate the exact sequence of steps to achieve this.
 Use these action types: 'navigate', 'click', 'type', 'press_enter', 'select', 'check', 'uncheck', 'scroll'.
 
 Rules for steps:
 - Always start with a 'navigate' action to the correct website URL.
-- For 'click', 'type', 'select', you MUST provide a 'selectors' object with at least a 'css' property predicting the CSS selector. Also provide 'ariaLabel' or 'placeholder' if applicable.
-- For 'type', you MUST provide the 'value' to type.
-- Each step MUST have a short human-readable 'description'.
+- If the prompt implies multiple actions (e.g., "Search for X and click first result"), break it down into logical steps.
+- For interactive steps, provide a 'selectors' object. 
+- The engine uses a heuristic scoring system, so provide multiple identifiers inside 'selectors' to increase reliability:
+  - 'css': A predicted CSS selector (e.g. "button[type='submit']", "input[name='q']").
+  - 'text': The exact visible text (e.g. "Login", "Search", "Submit").
+  - 'ariaLabel': The aria-label attribute value.
+  - 'attributes': An object containing other common attributes like 'name', 'placeholder', 'type', 'id'.
+- For 'type', provide the 'value' to type.
+- Each step MUST have a 'description' explaining what it does.
 
-Return ONLY a JSON array of step objects, like this:
-[
-  { "action": "navigate", "url": "https://example.com", "description": "Go to example.com" },
-  { "action": "type", "selectors": { "css": "input[name='q']", "placeholder": "Search" }, "value": "Vibathon", "description": "Type Vibathon" },
-  { "action": "click", "selectors": { "css": "button.login", "text": "Login" }, "description": "Click Login" }
-]` }] }],
+Return a JSON object with:
+{
+  "steps": [...],
+  "summary": "Short 1-sentence summary of the workflow",
+  "thinking": "Brief explanation of your reasoning for these steps and selectors"
+}
+
+Example:
+{
+  "steps": [
+    { "action": "navigate", "url": "https://www.google.com", "description": "Navigate to Google" },
+    { "action": "type", "selectors": { "css": "textarea[name='q']", "attributes": { "name": "q", "placeholder": "Search" } }, "value": "Vibathon", "description": "Type search query" },
+    { "action": "press_enter", "description": "Perform search" }
+  ],
+  "summary": "Searching Google for Vibathon",
+  "thinking": "I started by navigating to Google. Then I identified the search textarea by its name 'q' which is a standard identifier."
+}` }] }],
                 generationConfig: { responseMimeType: "application/json" }
             };
 
@@ -525,12 +546,12 @@ Return ONLY a JSON array of step objects, like this:
                 const result = await response.json();
                 const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
                 if (text) {
-                    steps = JSON.parse(text);
-                    if (!Array.isArray(steps)) steps = [steps];
+                    const parsed = JSON.parse(text);
+                    const finalSteps = Array.isArray(parsed.steps) ? parsed.steps : (Array.isArray(parsed) ? parsed : [parsed]);
                     return { 
-                        steps, 
-                        summary: 'AI Generated Workflow', 
-                        thinking: `I generated ${steps.length} steps based on your prompt.` 
+                        steps: finalSteps, 
+                        summary: parsed.summary || 'AI Generated Workflow', 
+                        thinking: parsed.thinking || `I generated ${finalSteps.length} steps based on your prompt.` 
                     };
                 }
             } else {
