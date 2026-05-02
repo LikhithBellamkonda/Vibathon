@@ -492,6 +492,10 @@ async function generateWorkflowFromPrompt(promptText) {
     const apiKey = await getApiKey();
     if (!apiKey) return { error: 'No API Key configured.' };
 
+    if (apiKey.startsWith('sk-')) {
+        return generateWithOpenAI(promptText, pageContext, apiKey);
+    }
+
     const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"];
     let lastError = '';
 
@@ -572,6 +576,53 @@ Example:
     return { error: 'Failed to generate workflow: ' + lastError };
 }
 
+async function generateWithOpenAI(promptText, pageContext, apiKey) {
+    try {
+        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: "gpt-4o",
+                messages: [
+                    {
+                        role: "system",
+                        content: `You are an AI browser automation expert. Return ONLY a JSON object.
+Rules for steps:
+- Use action types: 'navigate', 'click', 'type', 'press_enter', 'select', 'check', 'uncheck', 'scroll'.
+- Always start with a 'navigate' action to the correct website URL.
+- Provide a 'selectors' object with 'css', 'text', 'ariaLabel', and 'attributes' (id, name, placeholder).
+- Each step MUST have a 'description'.
+- Return format: { "steps": [...], "summary": "...", "thinking": "..." }`
+                    },
+                    {
+                        role: "user",
+                        content: `Build a workflow for: "${promptText}" ${pageContext}`
+                    }
+                ],
+                response_format: { type: "json_object" }
+            })
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error?.message || "OpenAI API error");
+        }
+
+        const result = await response.json();
+        const content = JSON.parse(result.choices[0].message.content);
+        return {
+            steps: content.steps || [],
+            summary: content.summary || "AI Generated Workflow",
+            thinking: content.thinking || "Generated using OpenAI GPT-4o."
+        };
+    } catch (err) {
+        return { error: "OpenAI Generation failed: " + err.message };
+    }
+}
+
 function describeEvent(e) {
     const s = e.selectors || {};
     const label = s.ariaLabel || s.text || s.attributes?.name || s.attributes?.placeholder || s.css || 'element';
@@ -592,9 +643,28 @@ function describeEvent(e) {
 
 // ============ TEST API ============
 async function testApiConnection() {
-    const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"];
-    const errors = [];
     const apiKey = await getApiKey();
+    if (!apiKey) return { success: false, error: "No API Key" };
+
+    if (apiKey.startsWith('sk-')) {
+        try {
+            const response = await fetch("https://api.openai.com/v1/chat/completions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+                body: JSON.stringify({
+                    model: "gpt-4o-mini",
+                    messages: [{ role: "user", content: "Hello" }],
+                    max_tokens: 5
+                })
+            });
+            if (response.ok) return { success: true, message: "✅ Connected to OpenAI (gpt-4o-mini)" };
+            const err = await response.json();
+            return { success: false, error: err.error?.message || "OpenAI error" };
+        } catch(e) { return { success: false, error: e.message }; }
+    }
+
+    const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"];
+    const errors = [];
     for (const model of modelsToTry) {
         try {
             const url = CONFIG.API_URL.replace(/gemini-[a-zA-Z0-9.\-]+(?=:)/, model);
