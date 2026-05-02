@@ -2,6 +2,14 @@
 
 Vibathon is a powerful, secure, and AI-driven Chrome Extension for recording, editing, and executing browser automation workflows. It transforms manual repetitive tasks into automated Playwright-style execution flows with advanced visual indicators and end-to-end security.
 
+## 🎯 The Problem
+
+**The Issue**: Manual, repetitive web tasks (like data entry, HR onboarding, CRM management, and daily report generation) consume countless hours of productive time. While automation tools exist (like Selenium or Playwright), they require deep coding knowledge, making them completely inaccessible to non-technical professionals. Conversely, existing "no-code" browser macros are often incredibly fragile (breaking on minor UI updates) and highly insecure (storing passwords in plain text).
+
+**Who is Facing It**: Operations managers, HR professionals, data entry clerks, administrators, and small business owners who spend large portions of their day doing repetitive, mundane web-based tasks.
+
+**Why It Matters**: Time wasted on repetitive data entry leads to employee burnout, human error, and massive losses in productivity. Providing a robust, secure, and zero-code way to automate these tasks empowers non-technical workers to reclaim their time and focus on high-value, creative work.
+
 ## ✨ Key Features
 
 - **🧠 AI Workflow Analysis**: Uses Gemini AI to understand recorded interactions, generate summaries, and explain each step in plain English.
