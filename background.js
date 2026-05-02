@@ -492,7 +492,7 @@ async function generateWorkflowFromPrompt(promptText) {
     const apiKey = await getApiKey();
     if (!apiKey) return { error: 'No API Key configured.' };
 
-    const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"];
+    const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"];
     let lastError = '';
 
     for (const model of modelsToTry) {
