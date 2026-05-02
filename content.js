@@ -613,8 +613,8 @@ function movePointerTo(el) {
     const targetX = rect.left + rect.width / 2;
     const targetY = rect.top + rect.height / 2;
     
-    pointer.style.left = \`\${targetX}px\`;
-    pointer.style.top = \`\${targetY}px\`;
+    pointer.style.left = `${targetX}px`;
+    pointer.style.top = `${targetY}px`;
     
     setTimeout(resolve, 500); // match CSS transition duration
   });
@@ -626,10 +626,10 @@ function createClickRipple(el) {
   const y = rect.top + rect.height / 2;
   
   const ripple = document.createElement('div');
-  ripple.style.cssText = \`
+  ripple.style.cssText = `
     position: fixed;
-    left: \${x}px;
-    top: \${y}px;
+    left: ${x}px;
+    top: ${y}px;
     width: 20px;
     height: 20px;
     background: rgba(99, 102, 241, 0.6);
@@ -638,18 +638,18 @@ function createClickRipple(el) {
     pointer-events: none;
     z-index: 2147483646;
     animation: vibathon-ripple 0.6s ease-out forwards;
-  \`;
+  `;
   document.body.appendChild(ripple);
   
   if (!document.getElementById('vibathon-ripple-style')) {
     const style = document.createElement('style');
     style.id = 'vibathon-ripple-style';
-    style.textContent = \`
+    style.textContent = `
       @keyframes vibathon-ripple {
         0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
         100% { transform: translate(-50%, -50%) scale(4); opacity: 0; }
       }
-    \`;
+    `;
     document.head.appendChild(style);
   }
   
