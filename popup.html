@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vibathon AI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --text: #f8fafc;
+            --text-dim: #94a3b8;
+            --danger: #ef4444;
+            --success: #22c55e;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            width: 320px;
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 16px;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 800;
+            font-size: 1.25rem;
+            background: linear-gradient(to right, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-dim);
+        }
+
+        .status-dot.active { background: var(--success); box-shadow: 0 0 10px var(--success); }
+        .status-dot.recording { background: var(--danger); box-shadow: 0 0 10px var(--danger); animation: pulse 1.5s infinite; }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            margin-bottom: 16px;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-family: inherit;
+        }
+
+        #startBtn { background: var(--primary); color: white; }
+        #stopBtn { background: var(--danger); color: white; display: none; }
+        #openDashboard { background: rgba(255,255,255,0.05); color: var(--text); margin-top: 12px; border: 1px solid rgba(255,255,255,0.1); }
+        #openDashboard:hover { background: rgba(255,255,255,0.1); }
+
+        #status { font-weight: 600; margin-bottom: 16px; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">🎯 Vibathon</div>
+        <div id="statusIndicator" class="status-dot active"></div>
+    </div>
+
+    <div class="card">
+        <div id="statusContainer">
+            <div style="font-size: 0.75rem; color: var(--text-dim); margin-bottom: 2px;">STATUS</div>
+            <div id="status">System Ready</div>
+        </div>
+        
+        <button id="startBtn"><span>▶</span> Start Recording</button>
+        <button id="stopBtn"><span>⏹</span> Stop Recording</button>
+        <button id="openDashboard"><span>📊</span> Dashboard</button>
+    </div>
+
+    <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-dim);">
+        <span>v1.5 Premium</span>
+        <span>Secured by AI</span>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
