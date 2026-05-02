@@ -579,7 +579,6 @@ function showIndicator(type) {
 function hideIndicator() {
   document.getElementById('vibathon-status-indicator')?.remove();
 }
-} // end hideIndicator
 
 // ========== VISUAL AUTOMATION INDICATORS ==========
 
