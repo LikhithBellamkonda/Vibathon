@@ -37,11 +37,11 @@ const Vault = {
     },
     async saveSecret(id, value) {
         const encrypted = await this.encrypt(value);
-        await chrome.storage.local.set({ [\`vault_\${id}\`]: encrypted });
+        await chrome.storage.local.set({ [`vault_${id}`]: encrypted });
     },
     async getSecret(id) {
-        const stored = await chrome.storage.local.get(\`vault_\${id}\`);
-        const encObj = stored[\`vault_\${id}\`];
+        const stored = await chrome.storage.local.get(`vault_${id}`);
+        const encObj = stored[`vault_${id}`];
         if (!encObj) return '';
         return this.decrypt(encObj);
     }
@@ -368,29 +368,29 @@ async function analyzeWithGemini(data) {
 
     if (steps.length === 0) return { error: 'No actionable steps found.' };
 
-    let summary = \`Workflow with \${steps.length} steps\`;
-    let flowchart = steps.map((s, i) => \`Step \${i+1}: \${s.description}\`).join('\\n→ ');
-    let thinking = \`This workflow has \${steps.length} actions. Each step was recorded from your browser activity.\`;
+    let summary = `Workflow with ${steps.length} steps`;
+    let flowchart = steps.map((s, i) => `Step ${i+1}: ${s.description}`).join('\n→ ');
+    let thinking = `This workflow has ${steps.length} actions. Each step was recorded from your browser activity.`;
 
     const apiKey = await Storage.getApiKey();
     if (apiKey) {
         const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"];
         for (const model of modelsToTry) {
             try {
-                const url = API_URL.replace(/gemini-[a-zA-Z0-9.\\-]+(?=:)/, model);
+                const url = API_URL.replace(/gemini-[a-zA-Z0-9.\-]+(?=:)/, model);
                 const prompt = {
-                    contents: [{ parts: [{ text: \`You are an AI workflow analyzer. Analyze these browser automation steps and provide:
+                    contents: [{ parts: [{ text: `You are an AI workflow analyzer. Analyze these browser automation steps and provide:
 1. A one-sentence summary of what the workflow does
 2. A simple flowchart showing the flow
 3. Your thinking/reasoning about what each step does and why
 
-Steps: \${JSON.stringify(steps.map(s => s.description))}
+Steps: ${JSON.stringify(steps.map(s => s.description))}
 
 Return ONLY this JSON:
-{"summary":"one sentence summary of the full workflow","flowchart":"Start → step1 → step2 → End","thinking":"Explain what this workflow does step by step and why each step matters"}\` }] }],
+{"summary":"one sentence summary of the full workflow","flowchart":"Start → step1 → step2 → End","thinking":"Explain what this workflow does step by step and why each step matters"}` }] }],
                     generationConfig: { responseMimeType: "application/json" }
                 };
-                const response = await fetch(\`\${url}?key=\${apiKey}\`, {
+                const response = await fetch(`${url}?key=${apiKey}`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(prompt)
@@ -421,15 +421,15 @@ function describeEvent(e) {
     const friendlyUrl = (url) => { try { return new URL(url).hostname.replace('www.', ''); } catch(x) { return url || 'page'; } };
 
     switch(e.action) {
-        case 'click':       return \`Click on "\${label}"\`;
-        case 'type':        return \`Type "\${e.value || ''}" into "\${label}"\`;
-        case 'navigate':    return \`Open \${friendlyUrl(e.url || e.metadata?.url)}\`;
-        case 'press_enter': return \`Press Enter on "\${label}"\`;
-        case 'scroll':      return \`Scroll page\`;
-        case 'select':      return \`Select "\${e.value}"\`;
-        case 'check':       return \`Check checkbox\`;
-        case 'uncheck':     return \`Uncheck checkbox\`;
-        default:            return \`\${e.action} on \${label}\`;
+        case 'click':       return `Click on "${label}"`;
+        case 'type':        return `Type "${e.value || ''}" into "${label}"`;
+        case 'navigate':    return `Open ${friendlyUrl(e.url || e.metadata?.url)}`;
+        case 'press_enter': return `Press Enter on "${label}"`;
+        case 'scroll':      return `Scroll page`;
+        case 'select':      return `Select "${e.value}"`;
+        case 'check':       return `Check checkbox`;
+        case 'uncheck':     return `Uncheck checkbox`;
+        default:            return `${e.action} on ${label}`;
     }
 }
 
@@ -442,18 +442,18 @@ async function testApiConnection() {
     
     for (const model of modelsToTry) {
         try {
-            const url = API_URL.replace(/gemini-[a-zA-Z0-9.\\-]+(?=:)/, model);
-            const response = await fetch(\`\${url}?key=\${apiKey}\`, {
+            const url = API_URL.replace(/gemini-[a-zA-Z0-9.\-]+(?=:)/, model);
+            const response = await fetch(`${url}?key=${apiKey}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ contents: [{ parts: [{ text: "Hello" }] }] })
             });
-            if (response.ok) return { success: true, message: \`✅ Connected using model: \${model}\` };
+            if (response.ok) return { success: true, message: `✅ Connected using model: ${model}` };
             else {
                 const body = await response.json().catch(() => ({}));
-                errors.push(\`\${model}: \${body.error?.message || response.statusText}\`);
+                errors.push(`${model}: ${body.error?.message || response.statusText}`);
             }
-        } catch (err) { errors.push(\`\${model}: \${err.message}\`); }
+        } catch (err) { errors.push(`${model}: ${err.message}`); }
     }
     return { success: false, error: "Failed all models: " + errors.join(" | ") };
 }
