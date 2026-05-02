@@ -163,13 +163,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case "AUTOMATION_PROGRESS":
             automationProgress = {
-                stepIndex: message.stepIndex,
+                stepIdx: message.stepIdx,
                 totalSteps: message.totalSteps,
                 description: message.description,
-                status: message.status
+                status: message.status,
+                timestamp: Date.now()
             };
-            sendResponse({ success: true });
+            broadcastToTabs({ type: "AUTOMATION_PROGRESS", ...automationProgress });
             break;
+
+        case "SELF_HEAL_REQUEST":
+            requestAISuggestion(message.payload)
+                .then(sendResponse)
+                .catch(err => sendResponse({ error: err.message }));
+            return true;
 
         case "GET_PROGRESS":
             sendResponse({ progress: automationProgress });
@@ -681,6 +688,69 @@ async function testApiConnection() {
         } catch (err) { errors.push(`${model}: ${err.message}`); }
     }
     return { success: false, error: "Failed all models: " + errors.join(" | ") };
+}
+
+async function requestAISuggestion(payload) {
+    const apiKey = await getApiKey();
+    if (!apiKey) return { error: "No API Key" };
+
+    const promptText = `An automation step failed because the element was not found. 
+Action: ${payload.action}
+Original selectors: ${JSON.stringify(payload.selectors)}
+Page URL: ${payload.url}
+Page HTML snippet (last 3000 chars of body):
+${payload.html}
+
+Based on the HTML snippet, suggest a better CSS selector or XPath that uniquely identifies the correct element for this action.
+Return ONLY the selector string. No explanation or backticks.`;
+
+    // Try OpenAI if sk-
+    if (apiKey.startsWith('sk-')) {
+        try {
+            const response = await fetch("https://api.openai.com/v1/chat/completions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+                body: JSON.stringify({
+                    model: "gpt-4o",
+                    messages: [
+                        { role: "system", content: "You are a DOM expert. Return ONLY a single CSS selector or XPath string." },
+                        { role: "user", content: promptText }
+                    ]
+                })
+            });
+            const result = await response.json();
+            return { selector: result.choices[0].message.content.trim() };
+        } catch (e) { return { error: e.message }; }
+    }
+
+    // Otherwise try Gemini
+    const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"];
+    let lastError = '';
+
+    for (const model of modelsToTry) {
+        try {
+            const url = CONFIG.API_URL.replace(/gemini-[a-zA-Z0-9.\-]+(?=:)/, model);
+            const response = await fetch(`${url}?key=${apiKey}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: promptText }] }],
+                    generationConfig: { temperature: 0.1 }
+                })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) return { selector: text.trim() };
+            } else {
+                const errResult = await response.json().catch(() => ({}));
+                lastError = errResult.error?.message || response.statusText;
+            }
+        } catch (e) { lastError = e.message; }
+    }
+
+    return { error: "AI failed to suggest: " + lastError };
 }
 
 // ============ TAB UPDATE — re-inject recording ============

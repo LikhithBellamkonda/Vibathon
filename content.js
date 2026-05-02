@@ -453,8 +453,24 @@ async function runAutomation(steps) {
         if (isPageUnloading) await new Promise(() => {}); // Pause if unloading
 
         if (!el) {
-          reportProgress(stepIdx, steps.length, desc, 'failed');
-          Telemetry.log(stepIdx, `Failed: Element not found`, 'error');
+          const healedEl = await handleSelfHeal(step, stepIdx);
+          if (healedEl) {
+             // Element found via self-healing, continue
+             await new Promise(r => chrome.runtime.sendMessage({ type: 'SET_RESUME_STEPS', steps: steps.slice(i + 1) }, r));
+             const success = await executeStepAction(step, stepIdx, healedEl);
+             if (success) {
+               reportProgress(stepIdx, steps.length, desc, 'done');
+               Telemetry.log(stepIdx, `Completed (via self-heal): ${desc}`, 'success');
+             } else {
+               reportProgress(stepIdx, steps.length, desc, 'failed');
+               Telemetry.log(stepIdx, `Failed: ${desc}`, 'error');
+             }
+          } else {
+            reportProgress(stepIdx, steps.length, desc, 'failed');
+            Telemetry.log(stepIdx, `Failed: Element not found`, 'error');
+            // SKIP STEP as per requirements
+            Telemetry.log(stepIdx, `Skipping step due to failure...`, 'warn');
+          }
         } else {
           // Element found, going to interact. Next page should resume from next step if this triggers navigation.
           await new Promise(r => chrome.runtime.sendMessage({ type: 'SET_RESUME_STEPS', steps: steps.slice(i + 1) }, r));
@@ -635,6 +651,59 @@ function showIndicator(type) {
 
 function hideIndicator() {
   document.getElementById('vibathon-status-indicator')?.remove();
+}
+
+async function handleSelfHeal(step, stepIdx) {
+  console.log("%c Vibathon: Self-healing triggered", "color: #ff9f43; font-weight: bold;");
+  
+  // 1. Collect Context (Limit to 3000 chars as requested)
+  const htmlContext = document.body.innerHTML.slice(0, 3000);
+  const payload = {
+    action: step.action,
+    selectors: step.selectors,
+    metadata: step.metadata,
+    url: window.location.href,
+    html: htmlContext
+  };
+
+  // 2. Request AI suggestion (Max 2 attempts per step)
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      console.log(`%c Vibathon: AI Self-heal attempt ${attempt}...`, "color: #ff9f43;");
+      const response = await chrome.runtime.sendMessage({ 
+        type: "SELF_HEAL_REQUEST", 
+        payload 
+      });
+
+      if (response && response.selector) {
+        console.log(`%c Vibathon: AI suggested selector: ${response.selector}`, "color: #1dd1a1;");
+        
+        // 3. Validate selector
+        try {
+          const el = document.querySelector(response.selector);
+          if (el) {
+            console.log("%c Vibathon: Retry success! Element found with AI selector.", "color: #1dd1a1; font-weight: bold;");
+            return el;
+          }
+        } catch (e) {
+          // Maybe it's XPath?
+          try {
+            const result = document.evaluate(response.selector, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+            const el = result.singleNodeValue;
+            if (el) {
+              console.log("%c Vibathon: Retry success! Element found with AI XPath.", "color: #1dd1a1; font-weight: bold;");
+              return el;
+            }
+          } catch (e2) {}
+        }
+      }
+    } catch (err) {
+      console.error("Self-healing error:", err);
+    }
+  }
+
+  console.warn("Vibathon: Self-healing failed after 2 attempts.");
+  return null;
 }
 
 } // end content script guard
