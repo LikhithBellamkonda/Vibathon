@@ -557,9 +557,15 @@ Example:
             } else {
                 const errResult = await response.json().catch(()=>({}));
                 lastError = errResult.error?.message || response.statusText;
+                
+                // If quota error, wait a bit before trying next model
+                if (lastError.toLowerCase().includes('quota')) {
+                    await new Promise(r => setTimeout(r, 2000));
+                }
             }
         } catch(e) {
             lastError = e.message;
+            await new Promise(r => setTimeout(r, 1000));
         }
     }
 
