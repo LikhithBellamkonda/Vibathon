@@ -79,6 +79,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     checkInitialStatus();
     startActivityPolling();
     loadFaceEnrollmentState();
+    loadWorkflowFromURL(); // Check for shared workflow in URL
 });
 
 function setupButtonHandlers() {
@@ -211,6 +212,37 @@ function setupButtonHandlers() {
                 await chrome.runtime.sendMessage({ type: 'CLEAR_ALL_HISTORY' });
                 loadHistory();
             }
+        };
+    }
+
+    // Share Button on Dashboard
+    const shareBtn = document.getElementById('shareBtn');
+    if (shareBtn) {
+        shareBtn.onclick = async () => {
+            if (currentSteps.length === 0) return alert('No steps to share.');
+            const workflow = {
+                name: workflowNameInput.value || 'Shared Workflow',
+                steps: currentSteps,
+                thinking: currentThinking,
+                summary: currentSummary,
+                startUrl: getStartUrl()
+            };
+            const link = await generateShareLink(workflow);
+            showShareModal(link);
+        };
+    }
+
+    // Modal controls
+    const closeShareModalBtn = document.getElementById('closeShareModalBtn');
+    if (closeShareModalBtn) closeShareModalBtn.onclick = () => { document.getElementById('shareModal').style.display = 'none'; };
+    
+    const copyShareLinkBtn = document.getElementById('copyShareLinkBtn');
+    if (copyShareLinkBtn) {
+        copyShareLinkBtn.onclick = () => {
+            const input = document.getElementById('shareLinkInput');
+            input.select();
+            document.execCommand('copy');
+            showToast("Link copied to clipboard!");
         };
     }
 }
@@ -626,6 +658,7 @@ async function loadHistory(searchQuery = '') {
             </div>
             <div class="history-actions">
                 <button class="btn ${isSecured ? 'btn-warning' : 'btn-ghost'} btn-sm lock-hist-btn" data-id="${w.id}" title="${isSecured ? 'Remove security' : 'Enable face lock'}">${isSecured ? '🔒' : '🔓'}</button>
+                <button class="btn btn-ghost btn-sm share-hist-btn" data-id="${w.id}" title="Share workflow">🔗</button>
                 <button class="btn btn-success btn-sm run-hist-btn" data-id="${w.id}">🚀 Run</button>
                 <button class="btn btn-warning btn-sm edit-hist-btn" data-id="${w.id}">✏️ Edit</button>
                 <button class="btn btn-ghost btn-sm del-hist-btn" data-id="${w.id}">🗑️</button>
@@ -671,6 +704,18 @@ async function loadHistory(searchQuery = '') {
                 const id = parseInt(btn.dataset.id);
                 await chrome.runtime.sendMessage({ type: "DELETE_WORKFLOW", id });
                 loadHistory();
+            }
+        };
+    });
+
+    // Share buttons
+    document.querySelectorAll('.share-hist-btn').forEach(btn => {
+        btn.onclick = async () => {
+            const id = parseInt(btn.dataset.id);
+            const wf = res.history.find(w => w.id === id);
+            if (wf) {
+                const link = await generateShareLink(wf);
+                showShareModal(link);
             }
         };
     });
@@ -985,3 +1030,100 @@ runAutomation = async function(steps, historyStartUrl, workflowMeta) {
     }
     return _originalRunAutomation(steps, historyStartUrl);
 };
+
+// ===== SHARING & IMPORT LOGIC =====
+async function encodeWorkflow(workflow) {
+    // Strip sensitive fields
+    const stripped = {
+        name: workflow.name,
+        steps: (workflow.steps || []).map(s => {
+            const { encryptedValue, ...rest } = s;
+            return rest;
+        }),
+        summary: workflow.summary,
+        thinking: workflow.thinking,
+        startUrl: workflow.startUrl
+    };
+    
+    const json = JSON.stringify(stripped);
+    try {
+        // Use GZIP compression via CompressionStream
+        const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'));
+        const response = new Response(stream);
+        const buffer = await response.arrayBuffer();
+        const binary = String.fromCharCode(...new Uint8Array(buffer));
+        return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    } catch (e) {
+        return btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+}
+
+async function decodeWorkflow(encodedString) {
+    try {
+        let base64 = encodedString.replace(/-/g, '+').replace(/_/g, '/');
+        while (base64.length % 4) base64 += '=';
+        
+        const binary = atob(base64);
+        const buffer = Uint8Array.from(binary, c => c.charCodeAt(0));
+        
+        try {
+            const stream = new Blob([buffer]).stream().pipeThrough(new DecompressionStream('gzip'));
+            const response = new Response(stream);
+            const text = await response.text();
+            return JSON.parse(text);
+        } catch (e) {
+            const text = new TextDecoder().decode(buffer);
+            return JSON.parse(text);
+        }
+    } catch (e) {
+        console.error("Failed to decode workflow:", e);
+        return null;
+    }
+}
+
+async function generateShareLink(workflow) {
+    const encoded = await encodeWorkflow(workflow);
+    const extensionId = chrome.runtime.id;
+    return `chrome-extension://${extensionId}/recorder.html?workflow=${encoded}`;
+}
+
+async function loadWorkflowFromURL() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const encoded = urlParams.get('workflow');
+    if (encoded) {
+        const workflow = await decodeWorkflow(encoded);
+        if (workflow) {
+            currentSteps = workflow.steps || [];
+            currentThinking = workflow.thinking || '';
+            currentSummary = workflow.summary || '';
+            workflowNameInput.value = workflow.name || 'Imported Workflow';
+            
+            switchView('dashboard');
+            renderVisualFlowchart();
+            showToast("Workflow imported successfully!");
+            
+            window.history.replaceState({}, document.title, window.location.pathname);
+        } else {
+            showToast("Failed to import workflow", "error");
+        }
+    }
+}
+
+function showShareModal(link) {
+    const modal = document.getElementById('shareModal');
+    const input = document.getElementById('shareLinkInput');
+    if (modal && input) {
+        input.value = link;
+        modal.style.display = 'flex';
+    }
+}
+
+function showToast(message, type = 'success') {
+    const toast = document.getElementById('toast');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.className = 'toast show ' + type;
+    setTimeout(() => {
+        toast.className = 'toast ' + type;
+    }, 3000);
+}
