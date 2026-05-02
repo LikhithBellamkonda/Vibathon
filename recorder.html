@@ -882,6 +882,7 @@
             <div class="header-row">
                 <h1>Dashboard</h1>
                 <div id="globalControls" style="display:flex;gap:10px;">
+                    <button id="pasteGlobalBtn" class="btn btn-ghost"><span>📋</span> Paste JSON</button>
                     <button id="startBtn" class="btn btn-primary"><span>▶</span> Start Recording</button>
                     <button id="stopBtn" class="btn btn-danger" style="display:none;"><span>⏹</span> Stop &
                         Analyze</button>
@@ -977,11 +978,12 @@
         <div id="shareModal" class="modal-overlay" style="display:none;">
             <div class="modal-content glass" style="max-width:500px;">
                 <h2>Share Workflow</h2>
-                <p style="color:var(--text-dim); margin-bottom:20px;">Copy the link below to share this automation with others.</p>
-                <div style="display:flex; gap:10px; margin-bottom:20px;">
+                <p style="color:var(--text-dim); margin-bottom:20px;">Copy the link or the raw JSON to share this automation.</p>
+                <div style="display:flex; gap:10px; margin-bottom:12px;">
                     <input type="text" id="shareLinkInput" readonly style="flex:1; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text); padding:10px; border-radius:8px;">
-                    <button id="copyShareLinkBtn" class="btn btn-primary">Copy</button>
+                    <button id="copyShareLinkBtn" class="btn btn-primary">Copy Link</button>
                 </div>
+                <button id="copyShareJsonBtn" class="btn btn-ghost" style="width:100%; margin-bottom:10px;">💾 Copy Raw JSON (Manual Paste)</button>
                 <button id="closeShareModalBtn" class="btn btn-ghost" style="width:100%;">Close</button>
             </div>
         </div>

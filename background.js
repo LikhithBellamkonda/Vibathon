@@ -86,7 +86,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             recordedEvents = [];
             automationProgress = null;
             chrome.storage.local.remove('vibathon_resume_steps');
-            persistState();
+            
+            // Capture initial navigation so the first step isn't missed
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs[0]?.url && !tabs[0].url.startsWith('chrome://')) {
+                    recordedEvents.push({
+                        action: 'navigate',
+                        url: tabs[0].url,
+                        recordedAt: Date.now(),
+                        pageUrl: tabs[0].url,
+                        metadata: { url: tabs[0].url, timestamp: Date.now() }
+                    });
+                    persistState();
+                }
+            });
+
             broadcastToTabs({ type: "START_RECORDING" });
             sendResponse({ success: true });
             break;

@@ -255,7 +255,7 @@ function setupButtonHandlers() {
                 startUrl: getStartUrl()
             };
             const link = await generateShareLink(workflow);
-            showShareModal(link);
+            showShareModal(link, workflow);
         };
     }
 
@@ -270,6 +270,41 @@ function setupButtonHandlers() {
             input.select();
             document.execCommand('copy');
             showToast("Link copied to clipboard!");
+        };
+    }
+
+    const copyShareJsonBtn = document.getElementById('copyShareJsonBtn');
+    if (copyShareJsonBtn) {
+        copyShareJsonBtn.onclick = () => {
+            if (currentSharedWorkflow) {
+                const json = JSON.stringify(currentSharedWorkflow, null, 2);
+                navigator.clipboard.writeText(json).then(() => {
+                    showToast("Raw JSON copied to clipboard!");
+                });
+            }
+        };
+    }
+
+    const pasteGlobalBtn = document.getElementById('pasteGlobalBtn');
+    if (pasteGlobalBtn) {
+        pasteGlobalBtn.onclick = async () => {
+            try {
+                const text = await navigator.clipboard.readText();
+                const workflow = JSON.parse(text);
+                if (!workflow.steps) throw new Error("Invalid format: missing steps");
+                
+                currentSteps = workflow.steps;
+                currentThinking = workflow.thinking || 'Manually imported JSON';
+                currentSummary = workflow.summary || 'Imported from clipboard';
+                workflowNameInput.value = workflow.name || 'Imported JSON';
+                editingWorkflowId = null;
+                
+                switchView('dashboard');
+                renderVisualFlowchart();
+                showToast("Workflow imported from clipboard!");
+            } catch (err) {
+                alert("Failed to paste JSON: " + err.message);
+            }
         };
     }
 }
@@ -748,7 +783,7 @@ async function loadHistory(searchQuery = '') {
             const wf = res.history.find(w => w.id === id);
             if (wf) {
                 const link = await generateShareLink(wf);
-                showShareModal(link);
+                showShareModal(link, wf);
             }
         };
     });
@@ -1142,10 +1177,13 @@ async function loadWorkflowFromURL() {
     }
 }
 
-function showShareModal(link) {
+let currentSharedWorkflow = null;
+
+function showShareModal(link, workflow) {
     const modal = document.getElementById('shareModal');
     const input = document.getElementById('shareLinkInput');
     if (modal && input) {
+        currentSharedWorkflow = workflow;
         input.value = link;
         modal.style.display = 'flex';
     }
