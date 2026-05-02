@@ -9,6 +9,7 @@ let isSecuredWorkflow = false;
 
 const views = {
     dashboard: document.getElementById('dashboardView'),
+    prompt: document.getElementById('promptView'),
     history: document.getElementById('historyView'),
     security: document.getElementById('securityView')
 };
@@ -70,8 +71,8 @@ function switchView(viewName) {
 // ===== INIT =====
 document.addEventListener('DOMContentLoaded', async () => {
     initNavigation();
-    chrome.storage.local.get(['apiKey'], (data) => {
-        if (data.apiKey && apiKeyInput) apiKeyInput.value = data.apiKey;
+    chrome.storage.local.get(['gemini_api_key'], (data) => {
+        if (data.gemini_api_key && apiKeyInput) apiKeyInput.value = data.gemini_api_key;
     });
     setupButtonHandlers();
     setupFaceRecognition();
@@ -83,7 +84,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 function setupButtonHandlers() {
     if (saveApiBtn) {
         saveApiBtn.onclick = () => {
-            chrome.storage.local.set({ apiKey: apiKeyInput.value }, () => {
+            chrome.storage.local.set({ gemini_api_key: apiKeyInput.value }, () => {
                 alert("API Key saved!");
             });
         };
@@ -157,6 +158,61 @@ function setupButtonHandlers() {
     if (document.getElementById('testApiBtn')) {
         document.getElementById('testApiBtn').onclick = testApi;
     }
+
+    // AI Prompt Logic
+    const generatePromptBtn = document.getElementById('generatePromptBtn');
+    if (generatePromptBtn) {
+        generatePromptBtn.onclick = async () => {
+            const promptInput = document.getElementById('aiPromptInput');
+            const promptLoading = document.getElementById('promptLoading');
+            const promptText = promptInput.value.trim();
+            if (!promptText) return alert('Please enter a description for the automation.');
+            
+            generatePromptBtn.style.display = 'none';
+            promptLoading.style.display = 'block';
+            
+            try {
+                const res = await chrome.runtime.sendMessage({ type: 'GENERATE_WORKFLOW', prompt: promptText });
+                if (res && res.error) {
+                    alert('Error generating workflow: ' + res.error);
+                } else if (res && res.steps) {
+                    currentSteps = res.steps;
+                    currentThinking = res.thinking || '';
+                    currentSummary = res.summary || '';
+                    workflowNameInput.value = 'AI Generated Workflow';
+                    editingWorkflowId = null;
+                    
+                    // Switch to dashboard and show flowchart
+                    switchView('dashboard');
+                    renderVisualFlowchart();
+                }
+            } catch (err) {
+                alert('Generation failed: ' + err.message);
+            } finally {
+                generatePromptBtn.style.display = 'block';
+                promptLoading.style.display = 'none';
+            }
+        };
+    }
+
+    // Search History
+    const searchHistoryInput = document.getElementById('searchHistoryInput');
+    if (searchHistoryInput) {
+        searchHistoryInput.addEventListener('input', () => {
+            loadHistory(searchHistoryInput.value);
+        });
+    }
+
+    // Clear All History
+    const clearAllHistoryBtn = document.getElementById('clearAllHistoryBtn');
+    if (clearAllHistoryBtn) {
+        clearAllHistoryBtn.onclick = async () => {
+            if (confirm('Are you sure you want to delete ALL workflow history? This cannot be undone.')) {
+                await chrome.runtime.sendMessage({ type: 'CLEAR_ALL_HISTORY' });
+                loadHistory();
+            }
+        };
+    }
 }
 
 function getStartUrl() {
@@ -167,25 +223,6 @@ function getStartUrl() {
 
 async function checkInitialStatus() {
     try {
-        const pending = await chrome.storage.local.get('vibathon_pending_analysis');
-        if (pending.vibathon_pending_analysis) {
-            const res = pending.vibathon_pending_analysis;
-            currentSteps = res.steps || [];
-            currentThinking = res.thinking || '';
-            currentSummary = res.summary || '';
-            
-            // Get the raw events from session state so we can show the feed too
-            const state = await chrome.runtime.sendMessage({ type: "GET_RECORDING" });
-            if (state && state.events) currentEvents = state.events;
-            
-            updateUI('idle');
-            updateEventsUI();
-            renderVisualFlowchart();
-            
-            await chrome.storage.local.remove('vibathon_pending_analysis');
-            return;
-        }
-
         const res = await chrome.runtime.sendMessage({ type: "GET_RECORDING" });
         if (res) {
             currentEvents = res.events || [];
@@ -554,14 +591,27 @@ function addStepAt(index) {
 }
 
 // ===== HISTORY =====
-async function loadHistory() {
+async function loadHistory(searchQuery = '') {
     const res = await chrome.runtime.sendMessage({ type: "GET_HISTORY" });
     if (!res || !res.history || res.history.length === 0) {
         historyList.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-dim);">No saved workflows.</div>';
         return;
     }
 
-    historyList.innerHTML = res.history.map(w => {
+    const filteredHistory = res.history.filter(w => {
+        if (!searchQuery) return true;
+        const q = searchQuery.toLowerCase();
+        const name = (w.name || '').toLowerCase();
+        const url = (w.startUrl || '').toLowerCase();
+        return name.includes(q) || url.includes(q);
+    });
+
+    if (filteredHistory.length === 0) {
+        historyList.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-dim);">No matching workflows found.</div>';
+        return;
+    }
+
+    historyList.innerHTML = filteredHistory.map(w => {
         const stepCount = w.steps?.length || 0;
         const date = new Date(w.createdAt).toLocaleDateString();
         const startSite = w.startUrl ? friendlyUrl(w.startUrl) : '';

@@ -87,28 +87,6 @@
         #openDashboard:hover { background: rgba(255,255,255,0.1); }
 
         #status { font-weight: 600; margin-bottom: 16px; font-size: 0.9rem; }
-        
-        .spinner {
-            border: 3px solid rgba(255,255,255,0.1);
-            border-top: 3px solid var(--primary);
-            border-radius: 50%;
-            width: 24px;
-            height: 24px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 12px;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        
-        .error-msg {
-            color: var(--danger);
-            font-size: 0.8rem;
-            margin-bottom: 16px;
-            background: rgba(239, 68, 68, 0.1);
-            padding: 8px;
-            border-radius: 8px;
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            display: none;
-        }
     </style>
 </head>
 <body>
@@ -123,20 +101,13 @@
             <div id="status">System Ready</div>
         </div>
         
-        <div id="loader" style="display:none; text-align:center;">
-            <div class="spinner"></div>
-            <div style="font-size:0.8rem;color:var(--text-dim);">AI is analyzing workflow...</div>
-        </div>
-        
-        <div id="errorBox" class="error-msg"></div>
-
         <button id="startBtn"><span>▶</span> Start Recording</button>
         <button id="stopBtn"><span>⏹</span> Stop Recording</button>
         <button id="openDashboard"><span>📊</span> Dashboard</button>
     </div>
 
     <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-dim);">
-        <span>v3.0 Premium</span>
+        <span>v1.5 Premium</span>
         <span>Secured by AI</span>
     </div>
 

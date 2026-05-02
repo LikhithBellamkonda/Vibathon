@@ -507,16 +507,27 @@ async function executeStepAction(step, stepIdx, el) {
       case 'type':
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.focus();
+        el.click(); // React/Vue often need click to activate fully
         const text = step.value || '';
         if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set || 
+                               Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
           // Clear field
-          el.value = '';
+          if (nativeSetter) nativeSetter.call(el, '');
+          else el.value = '';
           el.dispatchEvent(new Event('input', { bubbles: true }));
+          
           // Type character by character
           for (let c = 0; c < text.length; c++) {
-            el.value += text[c];
+            const char = text[c];
+            el.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
+            el.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
+            
+            if (nativeSetter) nativeSetter.call(el, el.value + char);
+            else el.value += char;
+            
             el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-            el.dispatchEvent(new Event('beforeinput', { bubbles: true, cancelable: true }));
+            el.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
             await new Promise(r => setTimeout(r, ENGINE_CONFIG.TYPE_DELAY_MIN + Math.random() * (ENGINE_CONFIG.TYPE_DELAY_MAX - ENGINE_CONFIG.TYPE_DELAY_MIN)));
           }
           el.dispatchEvent(new Event('change', { bubbles: true }));

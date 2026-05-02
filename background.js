@@ -4,7 +4,7 @@
 
 const CONFIG = {
     GEMINI_API_KEY: "AIzaSyD6doyLCF4FwSlKP4qXKzCw9VuJ5E5n7-k",
-    API_URL: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+    API_URL: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 };
 
 // --- Encrypted Vault using AES-GCM ---
@@ -143,6 +143,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             analyzeWithGemini(message.rawData)
                 .then(sendResponse)
                 .catch(err => sendResponse({ error: err.message }));
+            return true;
+
+        case "GENERATE_WORKFLOW":
+            generateWorkflowFromPrompt(message.prompt)
+                .then(sendResponse)
+                .catch(err => sendResponse({ error: err.message }));
+            return true;
+
+        case "CLEAR_ALL_HISTORY":
+            chrome.storage.local.remove('history', () => {
+                sendResponse({ success: true });
+            });
             return true;
 
         case "RUN_AUTOMATION":
@@ -430,7 +442,7 @@ async function analyzeWithGemini(data) {
 
     const apiKey = await getApiKey();
     if (apiKey) {
-        const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"];
+        const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"];
         for (const model of modelsToTry) {
             try {
                 const url = CONFIG.API_URL.replace(/gemini-[a-zA-Z0-9.\-]+(?=:)/, model);
@@ -469,6 +481,70 @@ Return ONLY this JSON:
     return { summary, flowchart, thinking, steps };
 }
 
+async function generateWorkflowFromPrompt(promptText) {
+    if (!promptText || promptText.trim() === '') return { error: 'Empty prompt.' };
+
+    let steps = [];
+    const apiKey = await getApiKey();
+    if (!apiKey) return { error: 'No API Key configured.' };
+
+    const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"];
+    let lastError = '';
+
+    for (const model of modelsToTry) {
+        try {
+            const url = CONFIG.API_URL.replace(/gemini-[a-zA-Z0-9.\-]+(?=:)/, model);
+            const promptPayload = {
+                contents: [{ parts: [{ text: `You are an AI browser automation expert. The user wants to build a web automation workflow based on this prompt: "${promptText}"
+
+Generate the exact sequence of steps to achieve this.
+Use these action types: 'navigate', 'click', 'type', 'press_enter', 'select', 'check', 'uncheck', 'scroll'.
+
+Rules for steps:
+- Always start with a 'navigate' action to the correct website URL.
+- For 'click', 'type', 'select', you MUST provide a 'selectors' object with at least a 'css' property predicting the CSS selector. Also provide 'ariaLabel' or 'placeholder' if applicable.
+- For 'type', you MUST provide the 'value' to type.
+- Each step MUST have a short human-readable 'description'.
+
+Return ONLY a JSON array of step objects, like this:
+[
+  { "action": "navigate", "url": "https://example.com", "description": "Go to example.com" },
+  { "action": "type", "selectors": { "css": "input[name='q']", "placeholder": "Search" }, "value": "Vibathon", "description": "Type Vibathon" },
+  { "action": "click", "selectors": { "css": "button.login", "text": "Login" }, "description": "Click Login" }
+]` }] }],
+                generationConfig: { responseMimeType: "application/json" }
+            };
+
+            const response = await fetch(`${url}?key=${apiKey}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(promptPayload)
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) {
+                    steps = JSON.parse(text);
+                    if (!Array.isArray(steps)) steps = [steps];
+                    return { 
+                        steps, 
+                        summary: 'AI Generated Workflow', 
+                        thinking: `I generated ${steps.length} steps based on your prompt.` 
+                    };
+                }
+            } else {
+                const errResult = await response.json().catch(()=>({}));
+                lastError = errResult.error?.message || response.statusText;
+            }
+        } catch(e) {
+            lastError = e.message;
+        }
+    }
+
+    return { error: 'Failed to generate workflow: ' + lastError };
+}
+
 function describeEvent(e) {
     const s = e.selectors || {};
     const label = s.ariaLabel || s.text || s.attributes?.name || s.attributes?.placeholder || s.css || 'element';
@@ -489,7 +565,7 @@ function describeEvent(e) {
 
 // ============ TEST API ============
 async function testApiConnection() {
-    const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"];
+    const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"];
     const errors = [];
     const apiKey = await getApiKey();
     for (const model of modelsToTry) {
