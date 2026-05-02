@@ -1,11 +1,13 @@
 // Vibathon Playwright-Level DOM Automation Engine (v3.0)
 // Fully working multi-step automation with cross-page navigation
 
-(function() {
-if (window.__vibathon_injected) return;
-window.__vibathon_injected = true;
+if (window.__vibathonContentLoaded) {
+  console.log('Vibathon: Engine already initialized.');
+} else {
+window.__vibathonContentLoaded = true;
 
 let isRecording = false;
+let isAutomating = false;
 let eventDebounce = {};
 let pendingTypeEvents = {};
 
@@ -237,21 +239,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // ========== RESUME ON PAGE LOAD ==========
 function attemptResume() {
+  if (isAutomating) return;
   chrome.runtime.sendMessage({ type: 'GET_RECORDING' }, (res) => {
     if (chrome.runtime.lastError) return;
     if (res?.isRecording) { isRecording = true; showIndicator('recording'); }
   });
-  chrome.storage.local.get('vibathon_resume_steps', (data) => {
-    if (data.vibathon_resume_steps?.length > 0) {
-      const steps = data.vibathon_resume_steps;
-      chrome.storage.local.remove('vibathon_resume_steps', () => {
-        Telemetry.log('R', `Resuming ${steps.length} remaining steps after navigation`);
-        waitForPageReady().then(() => {
-          // Decrypt any encrypted values before resuming
-          decryptStepsIfNeeded(steps).then(decrypted => runAutomation(decrypted));
-        });
-      });
-    }
+  chrome.runtime.sendMessage({ type: 'GET_RESUME_STEPS' }, (res) => {
+    if (chrome.runtime.lastError || !res || !res.steps || res.steps.length === 0) return;
+    const steps = res.steps;
+    Telemetry.log('R', `Resuming ${steps.length} remaining steps after navigation`);
+    waitForPageReady().then(() => {
+      // Decrypt any encrypted values before resuming
+      decryptStepsIfNeeded(steps).then(decrypted => runAutomation(decrypted));
+    });
   });
 }
 
@@ -307,6 +307,7 @@ setTimeout(attemptResume, 1500);
 // Secondary backup: listen for storage changes (covers race conditions)
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.vibathon_resume_steps?.newValue?.length > 0) {
+    if (isAutomating) return;
     // Another tab set steps for us to pick up - but only if this is the right page
     setTimeout(() => {
       chrome.storage.local.get('vibathon_resume_steps', (data) => {
@@ -402,6 +403,8 @@ document.addEventListener('keydown', (e) => {
 // ========== AUTOMATION ENGINE ==========
 async function runAutomation(steps) {
   if (!steps || steps.length === 0) return;
+  if (isAutomating) return;
+  isAutomating = true;
   showIndicator('automating');
   Telemetry.log('A', `Starting automation: ${steps.length} steps`);
 
@@ -416,8 +419,14 @@ async function runAutomation(steps) {
     } catch(e) {}
   }
 
+  let isPageUnloading = false;
+  window.addEventListener('beforeunload', () => { isPageUnloading = true; });
+  window.addEventListener('pagehide', () => { isPageUnloading = true; });
+
   try {
     for (let i = 0; i < steps.length; i++) {
+      if (isPageUnloading) await new Promise(() => {}); // Pause if unloading
+
       const step = steps[i];
       const stepIdx = i + 1;
       const desc = step.description || `${step.action} step`;
@@ -425,51 +434,61 @@ async function runAutomation(steps) {
       reportProgress(stepIdx, steps.length, desc, 'running');
       Telemetry.log(stepIdx, `Executing: ${step.action} — ${desc}`);
 
-      // NAVIGATE: save remaining steps and change location
+      // Save current step as resume point while we look for the element
+      await new Promise(r => chrome.runtime.sendMessage({ type: 'SET_RESUME_STEPS', steps: steps.slice(i) }, r));
+
+      // NAVIGATE: change location immediately
       if (step.action === 'navigate') {
         const url = step.url || step.metadata?.url;
         if (url) {
           reportProgress(stepIdx, steps.length, desc, 'navigating');
-          const remaining = steps.slice(i + 1);
-          if (remaining.length > 0) {
-            await new Promise(r => chrome.storage.local.set({ vibathon_resume_steps: remaining }, r));
-          }
+          await new Promise(r => chrome.runtime.sendMessage({ type: 'SET_RESUME_STEPS', steps: steps.slice(i + 1) }, r));
           Telemetry.log(stepIdx, `Navigating to: ${url}`);
           window.location.href = url;
           return; // Script dies here, will resume via attemptResume
         }
-      }
-
-      // All other actions: find element and execute
-      const success = await executeStep(step, stepIdx);
-      if (success) {
-        reportProgress(stepIdx, steps.length, desc, 'done');
-        Telemetry.log(stepIdx, `Completed: ${desc}`, 'success');
       } else {
-        reportProgress(stepIdx, steps.length, desc, 'failed');
-        Telemetry.log(stepIdx, `Failed: ${desc}`, 'error');
+        // Wait for element BEFORE committing to execute
+        const el = await waitForElement(step, stepIdx);
+        if (isPageUnloading) await new Promise(() => {}); // Pause if unloading
+
+        if (!el) {
+          reportProgress(stepIdx, steps.length, desc, 'failed');
+          Telemetry.log(stepIdx, `Failed: Element not found`, 'error');
+        } else {
+          // Element found, going to interact. Next page should resume from next step if this triggers navigation.
+          await new Promise(r => chrome.runtime.sendMessage({ type: 'SET_RESUME_STEPS', steps: steps.slice(i + 1) }, r));
+
+          const success = await executeStepAction(step, stepIdx, el);
+          if (success) {
+            reportProgress(stepIdx, steps.length, desc, 'done');
+            Telemetry.log(stepIdx, `Completed: ${desc}`, 'success');
+          } else {
+            reportProgress(stepIdx, steps.length, desc, 'failed');
+            Telemetry.log(stepIdx, `Failed: ${desc}`, 'error');
+          }
+        }
       }
 
+      if (isPageUnloading) await new Promise(() => {}); // Pause if unloading
       // Wait between steps
       await new Promise(r => setTimeout(r, ENGINE_CONFIG.STEP_DELAY));
     }
 
     reportProgress(steps.length, steps.length, 'Automation complete', 'complete');
     Telemetry.log('✓', 'All steps completed!', 'success');
+    chrome.runtime.sendMessage({ type: 'CLEAR_RESUME_STEPS' });
   } catch(err) {
     Telemetry.error('Automation crashed', err);
+    chrome.runtime.sendMessage({ type: 'CLEAR_RESUME_STEPS' });
   } finally {
+    isAutomating = false;
     hideIndicator();
   }
 }
 
-async function executeStep(step, stepIdx) {
-  const el = await waitForElement(step, stepIdx);
-  if (!el) {
-    Telemetry.warn(`Step ${stepIdx}: Element not found, skipping`);
-    return false;
-  }
-
+async function executeStepAction(step, stepIdx, el) {
+  await moveVirtualMouseTo(el);
   highlightElement(el);
   await new Promise(r => setTimeout(r, 300));
 
@@ -477,10 +496,6 @@ async function executeStep(step, stepIdx) {
     switch (step.action) {
       case 'click':
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await movePointerTo(el);
-        await new Promise(r => setTimeout(r, 300));
-        createClickRipple(el);
-        // Try native click first, then simulated events
         await new Promise(r => setTimeout(r, 300));
         // Try native click first, then simulated events
         el.focus();
@@ -491,7 +506,6 @@ async function executeStep(step, stepIdx) {
 
       case 'type':
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await movePointerTo(el);
         el.focus();
         const text = step.value || '';
         if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
@@ -550,6 +564,38 @@ async function executeStep(step, stepIdx) {
 }
 
 // ========== VISUAL UTILS ==========
+let virtualMouse = null;
+function createVirtualMouse() {
+  if (document.getElementById('vibathon-virtual-mouse')) return;
+  virtualMouse = document.createElement('div');
+  virtualMouse.id = 'vibathon-virtual-mouse';
+  virtualMouse.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5.5 3.21V20.8c0 .45.54.67.85.35l4.86-4.86a.5.5 0 0 1 .35-.15h6.87c.45 0 .67-.54.35-.85L6.35 2.86a.5.5 0 0 0-.85.35Z" fill="#333" stroke="#fff" stroke-width="2"/></svg>`;
+  virtualMouse.style.cssText = 'position:fixed;top:50%;left:50%;width:24px;height:24px;z-index:2147483647;pointer-events:none;transition:all 0.5s cubic-bezier(0.25, 1, 0.5, 1);opacity:0;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4));margin-top:-2px;margin-left:-4px;';
+  document.body.appendChild(virtualMouse);
+}
+
+async function moveVirtualMouseTo(el) {
+  createVirtualMouse();
+  virtualMouse = document.getElementById('vibathon-virtual-mouse');
+  
+  virtualMouse.style.opacity = '1';
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  await new Promise(r => setTimeout(r, 300));
+  
+  const rect = el.getBoundingClientRect();
+  const x = rect.left + (rect.width / 2);
+  const y = rect.top + (rect.height / 2);
+  
+  virtualMouse.style.left = `${x}px`;
+  virtualMouse.style.top = `${y}px`;
+  
+  await new Promise(r => setTimeout(r, 500));
+  
+  virtualMouse.style.transform = 'scale(0.8)';
+  await new Promise(r => setTimeout(r, 150));
+  virtualMouse.style.transform = 'scale(1)';
+}
+
 function highlightElement(el) {
   const orig = el.style.outline;
   const origShadow = el.style.boxShadow;
@@ -580,80 +626,4 @@ function hideIndicator() {
   document.getElementById('vibathon-status-indicator')?.remove();
 }
 
-// ========== VISUAL AUTOMATION INDICATORS ==========
-
-let visualPointer = null;
-
-function getVisualPointer() {
-  if (visualPointer) return visualPointer;
-  visualPointer = document.createElement('div');
-  visualPointer.style.cssText = `
-    position: fixed;
-    width: 24px;
-    height: 24px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z'/%3E%3C/svg%3E");
-    background-size: contain;
-    background-repeat: no-repeat;
-    pointer-events: none;
-    z-index: 2147483647;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    transition: top 0.5s cubic-bezier(0.25, 1, 0.5, 1), left 0.5s cubic-bezier(0.25, 1, 0.5, 1);
-    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));
-  `;
-  document.body.appendChild(visualPointer);
-  return visualPointer;
-}
-
-function movePointerTo(el) {
-  return new Promise(resolve => {
-    const pointer = getVisualPointer();
-    const rect = el.getBoundingClientRect();
-    const targetX = rect.left + rect.width / 2;
-    const targetY = rect.top + rect.height / 2;
-    
-    pointer.style.left = `${targetX}px`;
-    pointer.style.top = `${targetY}px`;
-    
-    setTimeout(resolve, 500); // match CSS transition duration
-  });
-}
-
-function createClickRipple(el) {
-  const rect = el.getBoundingClientRect();
-  const x = rect.left + rect.width / 2;
-  const y = rect.top + rect.height / 2;
-  
-  const ripple = document.createElement('div');
-  ripple.style.cssText = `
-    position: fixed;
-    left: ${x}px;
-    top: ${y}px;
-    width: 20px;
-    height: 20px;
-    background: rgba(99, 102, 241, 0.6);
-    border-radius: 50%;
-    transform: translate(-50%, -50%) scale(1);
-    pointer-events: none;
-    z-index: 2147483646;
-    animation: vibathon-ripple 0.6s ease-out forwards;
-  `;
-  document.body.appendChild(ripple);
-  
-  if (!document.getElementById('vibathon-ripple-style')) {
-    const style = document.createElement('style');
-    style.id = 'vibathon-ripple-style';
-    style.textContent = `
-      @keyframes vibathon-ripple {
-        0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
-        100% { transform: translate(-50%, -50%) scale(4); opacity: 0; }
-      }
-    `;
-    document.head.appendChild(style);
-  }
-  
-  setTimeout(() => ripple.remove(), 600);
-}
-
-})();
+} // end content script guard

@@ -2,9 +2,10 @@
 // Vibathon Background Service Worker v3.0 — Fully Self-Contained
 // ============================================================
 
-import { Storage } from './utils/storage.js';
-
-const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+const CONFIG = {
+    GEMINI_API_KEY: "AIzaSyD6doyLCF4FwSlKP4qXKzCw9VuJ5E5n7-k",
+    API_URL: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+};
 
 // --- Encrypted Vault using AES-GCM ---
 const Vault = {
@@ -21,7 +22,6 @@ const Vault = {
     },
     async encrypt(plaintext) {
         const key = await this._getKey();
-        // Secure IV Generation per encryption
         const iv = crypto.getRandomValues(new Uint8Array(12));
         const encoded = new TextEncoder().encode(plaintext);
         const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
@@ -47,21 +47,11 @@ const Vault = {
     }
 };
 
+let recordedEvents = [];
+let isRecording = false;
+let automationProgress = null;
+
 console.log('Vibathon Background SW v3.0 Initialized');
-
-// Helper to get session state securely
-async function getSessionState() {
-    const data = await chrome.storage.session.get(['isRecording', 'recordedEvents', 'automationProgress']);
-    return {
-        isRecording: data.isRecording || false,
-        recordedEvents: data.recordedEvents || [],
-        automationProgress: data.automationProgress || null
-    };
-}
-
-async function setSessionState(updates) {
-    await chrome.storage.session.set(updates);
-}
 
 // ============ KEEP ALIVE ============
 chrome.runtime.onInstalled.addListener(() => {
@@ -69,170 +59,237 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'keepAlive') {
-        // Alarms just keep the SW awake, session storage handles state naturally
+        chrome.storage.local.get(['sw_recordedEvents', 'sw_isRecording'], (data) => {
+            if (data.sw_isRecording) {
+                isRecording = data.sw_isRecording;
+                recordedEvents = data.sw_recordedEvents || [];
+            }
+        });
     }
 });
+
+function persistState() {
+    chrome.storage.local.set({ sw_recordedEvents: recordedEvents, sw_isRecording: isRecording });
+}
 
 // ============ MESSAGE LISTENER ============
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('Message Received:', message.type);
-    handleBackgroundMessage(message, sender).then(sendResponse).catch(err => {
-        console.error("Handler error:", err);
-        sendResponse({ success: false, error: err.message });
-    });
-    return true; // Keep message channel open for async response
-});
-
-async function handleBackgroundMessage(message, sender) {
-    const state = await getSessionState();
 
     switch (message.type) {
         case "PING":
-            return { alive: true };
+            sendResponse({ alive: true });
+            break;
 
         case "START_RECORDING":
-            await setSessionState({ isRecording: true, recordedEvents: [], automationProgress: null });
-            await chrome.storage.local.remove('vibathon_resume_steps');
+            isRecording = true;
+            recordedEvents = [];
+            automationProgress = null;
+            chrome.storage.local.remove('vibathon_resume_steps');
+            persistState();
             broadcastToTabs({ type: "START_RECORDING" });
-            return { success: true };
+            sendResponse({ success: true });
+            break;
 
         case "STOP_RECORDING":
-            await setSessionState({ isRecording: false });
+            isRecording = false;
             broadcastToTabs({ type: "STOP_RECORDING" });
-            return { events: state.recordedEvents };
+            persistState();
+            sendResponse({ events: recordedEvents });
+            break;
 
         case "RECORD_EVENT":
-            if (state.isRecording && message.event) {
+            if (isRecording && message.event) {
                 const event = {
                     ...message.event,
                     recordedAt: Date.now(),
                     tabId: sender.tab?.id,
                     pageUrl: sender.tab?.url
                 };
-                
+                // ENCRYPT password values before storing
                 if (event.isSensitive && event.value) {
-                    try {
-                        event.encryptedValue = await Vault.encrypt(event.value);
-                        event.value = '••••••••'; // Mask plaintext
-                    } catch(e) {
-                        console.error('Encryption failed', e);
-                    }
+                    Vault.encrypt(event.value).then(encrypted => {
+                        event.encryptedValue = encrypted;
+                        event.value = '••••••••'; // Mask the plaintext
+                        recordedEvents.push(event);
+                        persistState();
+                        sendResponse({ success: true });
+                    }).catch(() => {
+                        recordedEvents.push(event);
+                        persistState();
+                        sendResponse({ success: true });
+                    });
+                    return true; // async response
                 }
-                const updatedEvents = [...state.recordedEvents, event];
-                await setSessionState({ recordedEvents: updatedEvents });
+                recordedEvents.push(event);
+                persistState();
             }
-            return { success: true };
+            sendResponse({ success: true });
+            break;
 
         case "GET_RECORDING":
-            return { events: state.recordedEvents, isRecording: state.isRecording };
+            sendResponse({ events: recordedEvents, isRecording });
+            break;
 
         case "CLEAR_RECORDING":
-            await setSessionState({ isRecording: false, recordedEvents: [], automationProgress: null });
-            return { success: true };
+            recordedEvents = [];
+            isRecording = false;
+            automationProgress = null;
+            persistState();
+            sendResponse({ success: true });
+            break;
 
         case "ANALYZE_WORKFLOW":
-            try {
-                const result = await analyzeWithGemini(message.rawData);
-                return result;
-            } catch (err) {
-                return { error: err.message };
-            }
+            analyzeWithGemini(message.rawData)
+                .then(sendResponse)
+                .catch(err => sendResponse({ error: err.message }));
+            return true;
 
         case "RUN_AUTOMATION":
-            return await handleRunAutomation(message);
+            handleRunAutomation(message, sendResponse);
+            return true;
 
         case "AUTOMATION_PROGRESS":
-            await setSessionState({ automationProgress: {
+            automationProgress = {
                 stepIndex: message.stepIndex,
                 totalSteps: message.totalSteps,
                 description: message.description,
                 status: message.status
-            }});
-            return { success: true };
+            };
+            sendResponse({ success: true });
+            break;
 
         case "GET_PROGRESS":
-            return { progress: state.automationProgress };
+            sendResponse({ progress: automationProgress });
+            break;
 
         case "SAVE_WORKFLOW":
-            await Storage.saveWorkflow(message.workflow);
-            return { success: true };
+            chrome.storage.local.get({ history: [] }, (data) => {
+                const history = data.history || [];
+                history.unshift({ id: Date.now(), ...message.workflow });
+                chrome.storage.local.set({ history: history.slice(0, 50) }, () => {
+                    sendResponse({ success: true });
+                });
+            });
+            return true;
 
         case "UPDATE_WORKFLOW":
-            await Storage.saveWorkflow(message.workflow); // Storage.saveWorkflow handles updates
-            return { success: true };
+            chrome.storage.local.get({ history: [] }, (data) => {
+                const history = (data.history || []).map(w =>
+                    w.id === message.workflow.id ? { ...w, ...message.workflow } : w
+                );
+                chrome.storage.local.set({ history }, () => {
+                    sendResponse({ success: true });
+                });
+            });
+            return true;
 
         case "GET_HISTORY":
-            const history = await Storage.loadWorkflows();
-            return { history };
+            chrome.storage.local.get({ history: [] }, (data) => {
+                sendResponse({ history: data.history || [] });
+            });
+            return true;
 
         case "DELETE_WORKFLOW":
-            await Storage.deleteWorkflow(message.id);
-            return { success: true };
+            chrome.storage.local.get({ history: [] }, (data) => {
+                const filtered = (data.history || []).filter(w => w.id !== message.id);
+                chrome.storage.local.set({ history: filtered }, () => {
+                    sendResponse({ success: true });
+                });
+            });
+            return true;
+
+        case "SET_RESUME_STEPS":
+            if (sender.tab && sender.tab.id) {
+                chrome.storage.local.set({ [`vibathon_resume_steps_${sender.tab.id}`]: message.steps });
+            }
+            sendResponse({ success: true });
+            break;
+
+        case "GET_RESUME_STEPS":
+            if (sender.tab && sender.tab.id) {
+                const key = `vibathon_resume_steps_${sender.tab.id}`;
+                chrome.storage.local.get(key, (data) => {
+                    const steps = data[key];
+                    if (steps && steps.length > 0) {
+                        chrome.storage.local.remove(key, () => {
+                            sendResponse({ steps: steps });
+                        });
+                    } else {
+                        sendResponse({ steps: null });
+                    }
+                });
+                return true;
+            }
+            sendResponse({ steps: null });
+            break;
+
+        case "CLEAR_RESUME_STEPS":
+            if (sender.tab && sender.tab.id) {
+                chrome.storage.local.remove(`vibathon_resume_steps_${sender.tab.id}`);
+            }
+            sendResponse({ success: true });
+            break;
 
         case "CLEAR_RESUME":
-            await chrome.storage.local.remove('vibathon_resume_steps');
-            return { success: true };
+            chrome.storage.local.get(null, (data) => {
+                const keys = Object.keys(data).filter(k => k.startsWith('vibathon_resume_steps_'));
+                if (keys.length > 0) chrome.storage.local.remove(keys);
+            });
+            sendResponse({ success: true });
+            break;
 
         case "TEST_API":
-            return await testApiConnection();
+            testApiConnection()
+                .then(sendResponse)
+                .catch(err => sendResponse({ success: false, error: err.message }));
+            return true;
 
         case "ENCRYPT_VALUE":
-            try {
-                const enc = await Vault.encrypt(message.value);
-                return { success: true, encrypted: enc };
-            } catch (err) {
-                return { success: false, error: err.message };
-            }
+            Vault.encrypt(message.value)
+                .then(enc => sendResponse({ success: true, encrypted: enc }))
+                .catch(err => sendResponse({ success: false, error: err.message }));
+            return true;
 
         case "DECRYPT_VALUE":
-            try {
-                const val = await Vault.decrypt(message.encrypted);
-                return { success: true, value: val };
-            } catch (err) {
-                return { success: false, error: err.message };
-            }
+            Vault.decrypt(message.encrypted)
+                .then(val => sendResponse({ success: true, value: val }))
+                .catch(err => sendResponse({ success: false, error: err.message }));
+            return true;
 
         case "SAVE_SECRET":
-            try {
-                await Vault.saveSecret(message.id, message.value);
-                return { success: true };
-            } catch (err) {
-                return { success: false, error: err.message };
-            }
+            Vault.saveSecret(message.id, message.value)
+                .then(() => sendResponse({ success: true }))
+                .catch(err => sendResponse({ success: false, error: err.message }));
+            return true;
 
         case "GET_SECRET":
-            try {
-                const val = await Vault.getSecret(message.id);
-                return { success: true, value: val };
-            } catch (err) {
-                return { success: false, error: err.message };
-            }
+            Vault.getSecret(message.id)
+                .then(val => sendResponse({ success: true, value: val }))
+                .catch(err => sendResponse({ success: false, error: err.message }));
+            return true;
 
         default:
-            return { error: "Unknown message type: " + message.type };
+            sendResponse({ error: "Unknown message type: " + message.type });
+            break;
     }
-}
+});
 
 // ============ AUTOMATION HANDLER ============
-async function handleRunAutomation(message) {
+async function handleRunAutomation(message, sendResponse) {
     const steps = message.steps;
     if (!steps || steps.length === 0) {
-        return { success: false, error: "No steps to execute" };
+        sendResponse({ success: false, error: "No steps to execute" });
+        return;
     }
 
-    await setSessionState({ automationProgress: { stepIndex: 0, totalSteps: steps.length, description: 'Starting...', status: 'starting' } });
+    automationProgress = { stepIndex: 0, totalSteps: steps.length, description: 'Starting...', status: 'starting' };
 
     try {
         // Check if first step is navigate — handle from background
         if (steps[0].action === 'navigate') {
             const url = steps[0].url || steps[0].metadata?.url;
             if (url) {
-                const remaining = steps.slice(1);
-                // Save remaining steps for resume
-                if (remaining.length > 0) {
-                    await chrome.storage.local.set({ vibathon_resume_steps: remaining });
-                }
-
                 // Find or create a tab for the URL
                 let targetTab = null;
                 if (message.tabId) {
@@ -245,8 +302,15 @@ async function handleRunAutomation(message) {
                 } else {
                     targetTab = await chrome.tabs.create({ url, active: true });
                 }
+
+                const remaining = steps.slice(1);
+                // Save remaining steps for resume
+                if (remaining.length > 0) {
+                    await new Promise(r => chrome.storage.local.set({ [`vibathon_resume_steps_${targetTab.id}`]: remaining }, r));
+                }
                 
-                return { success: true };
+                sendResponse({ success: true });
+                return;
             }
         }
 
@@ -288,24 +352,18 @@ async function handleRunAutomation(message) {
         }
 
         if (!tabId) {
-            return { success: false, error: "No valid tab found and no URL to open. Open a web page first." };
+            sendResponse({ success: false, error: "No valid tab found and no URL to open. Open a web page first." });
+            return;
         }
 
         await chrome.tabs.update(tabId, { active: true });
 
         // Ensure content script is injected
-        const ping = await new Promise(r => {
-            chrome.tabs.sendMessage(tabId, { type: "PING" }, (resp) => {
-                if (chrome.runtime.lastError) r(null);
-                else r(resp);
-            });
-        });
-        
+        const ping = await chrome.tabs.sendMessage(tabId, { type: "PING" }).catch(() => null);
         if (!ping) {
             await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
             await new Promise(r => setTimeout(r, 800));
         }
-        
         // Decrypt any encrypted password values before sending to content script
         const decryptedSteps = await Promise.all(steps.map(async (step) => {
             if (step.encryptedValue) {
@@ -320,17 +378,11 @@ async function handleRunAutomation(message) {
             return step;
         }));
 
-        await new Promise(r => {
-            chrome.tabs.sendMessage(tabId, { type: "START_AUTOMATION", steps: decryptedSteps }, (resp) => {
-                if (chrome.runtime.lastError) console.warn(chrome.runtime.lastError.message);
-                r(resp);
-            });
-        });
-        
-        return { success: true };
+        await chrome.tabs.sendMessage(tabId, { type: "START_AUTOMATION", steps: decryptedSteps });
+        sendResponse({ success: true });
     } catch (err) {
         console.error("Automation error:", err);
-        return { success: false, error: "Automation failed: " + err.message };
+        sendResponse({ success: false, error: "Automation failed: " + err.message });
     }
 }
 
@@ -339,12 +391,16 @@ function broadcastToTabs(msg) {
     chrome.tabs.query({}, (tabs) => {
         tabs.forEach(tab => {
             if (tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
-                chrome.tabs.sendMessage(tab.id, msg, (response) => {
-                    if (chrome.runtime.lastError) {
-                        // Suppress warnings for broadcast since some tabs naturally don't have content scripts
-                    }
-                });
+                chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
             }
+        });
+    });
+}
+
+async function getApiKey() {
+    return new Promise(resolve => {
+        chrome.storage.local.get(['gemini_api_key'], data => {
+            resolve(data.gemini_api_key || CONFIG.GEMINI_API_KEY);
         });
     });
 }
@@ -372,12 +428,12 @@ async function analyzeWithGemini(data) {
     let flowchart = steps.map((s, i) => `Step ${i+1}: ${s.description}`).join('\n→ ');
     let thinking = `This workflow has ${steps.length} actions. Each step was recorded from your browser activity.`;
 
-    const apiKey = await Storage.getApiKey();
+    const apiKey = await getApiKey();
     if (apiKey) {
         const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"];
         for (const model of modelsToTry) {
             try {
-                const url = API_URL.replace(/gemini-[a-zA-Z0-9.\-]+(?=:)/, model);
+                const url = CONFIG.API_URL.replace(/gemini-[a-zA-Z0-9.\-]+(?=:)/, model);
                 const prompt = {
                     contents: [{ parts: [{ text: `You are an AI workflow analyzer. Analyze these browser automation steps and provide:
 1. A one-sentence summary of what the workflow does
@@ -408,8 +464,6 @@ Return ONLY this JSON:
                 }
             } catch(e) { continue; }
         }
-    } else {
-        return { error: 'No API Key configured. Please add one in Settings.' };
     }
 
     return { summary, flowchart, thinking, steps };
@@ -437,12 +491,10 @@ function describeEvent(e) {
 async function testApiConnection() {
     const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"];
     const errors = [];
-    const apiKey = await Storage.getApiKey();
-    if (!apiKey) return { success: false, error: "No API Key configured. Open Settings to set one." };
-    
+    const apiKey = await getApiKey();
     for (const model of modelsToTry) {
         try {
-            const url = API_URL.replace(/gemini-[a-zA-Z0-9.\-]+(?=:)/, model);
+            const url = CONFIG.API_URL.replace(/gemini-[a-zA-Z0-9.\-]+(?=:)/, model);
             const response = await fetch(`${url}?key=${apiKey}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -459,14 +511,11 @@ async function testApiConnection() {
 }
 
 // ============ TAB UPDATE — re-inject recording ============
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status === 'complete') {
-        const state = await getSessionState();
-        if (state.isRecording && tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
+        if (isRecording && tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
             setTimeout(() => {
-                chrome.tabs.sendMessage(tabId, { type: "START_RECORDING" }, (resp) => {
-                    if (chrome.runtime.lastError) {}
-                });
+                chrome.tabs.sendMessage(tabId, { type: "START_RECORDING" }).catch(() => {});
             }, 800);
         }
     }
