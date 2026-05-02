@@ -1,10 +1,8 @@
 // Vibathon Playwright-Level DOM Automation Engine (v3.0)
 // Fully working multi-step automation with cross-page navigation
 
-if (window.__vibathonContentLoaded) {
-  console.log('Vibathon: Engine already initialized.');
-} else {
-window.__vibathonContentLoaded = true;
+if (window.__vibathon_injected) return;
+window.__vibathon_injected = true;
 
 let isRecording = false;
 let eventDebounce = {};
@@ -478,6 +476,10 @@ async function executeStep(step, stepIdx) {
     switch (step.action) {
       case 'click':
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await movePointerTo(el);
+        await new Promise(r => setTimeout(r, 300));
+        createClickRipple(el);
+        // Try native click first, then simulated events
         await new Promise(r => setTimeout(r, 300));
         // Try native click first, then simulated events
         el.focus();
@@ -488,6 +490,7 @@ async function executeStep(step, stepIdx) {
 
       case 'type':
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await movePointerTo(el);
         el.focus();
         const text = step.value || '';
         if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
@@ -575,5 +578,80 @@ function showIndicator(type) {
 function hideIndicator() {
   document.getElementById('vibathon-status-indicator')?.remove();
 }
+} // end hideIndicator
 
-} // end content script guard
+// ========== VISUAL AUTOMATION INDICATORS ==========
+
+let visualPointer = null;
+
+function getVisualPointer() {
+  if (visualPointer) return visualPointer;
+  visualPointer = document.createElement('div');
+  visualPointer.style.cssText = `
+    position: fixed;
+    width: 24px;
+    height: 24px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z'/%3E%3C/svg%3E");
+    background-size: contain;
+    background-repeat: no-repeat;
+    pointer-events: none;
+    z-index: 2147483647;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    transition: top 0.5s cubic-bezier(0.25, 1, 0.5, 1), left 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));
+  `;
+  document.body.appendChild(visualPointer);
+  return visualPointer;
+}
+
+function movePointerTo(el) {
+  return new Promise(resolve => {
+    const pointer = getVisualPointer();
+    const rect = el.getBoundingClientRect();
+    const targetX = rect.left + rect.width / 2;
+    const targetY = rect.top + rect.height / 2;
+    
+    pointer.style.left = \`\${targetX}px\`;
+    pointer.style.top = \`\${targetY}px\`;
+    
+    setTimeout(resolve, 500); // match CSS transition duration
+  });
+}
+
+function createClickRipple(el) {
+  const rect = el.getBoundingClientRect();
+  const x = rect.left + rect.width / 2;
+  const y = rect.top + rect.height / 2;
+  
+  const ripple = document.createElement('div');
+  ripple.style.cssText = \`
+    position: fixed;
+    left: \${x}px;
+    top: \${y}px;
+    width: 20px;
+    height: 20px;
+    background: rgba(99, 102, 241, 0.6);
+    border-radius: 50%;
+    transform: translate(-50%, -50%) scale(1);
+    pointer-events: none;
+    z-index: 2147483646;
+    animation: vibathon-ripple 0.6s ease-out forwards;
+  \`;
+  document.body.appendChild(ripple);
+  
+  if (!document.getElementById('vibathon-ripple-style')) {
+    const style = document.createElement('style');
+    style.id = 'vibathon-ripple-style';
+    style.textContent = \`
+      @keyframes vibathon-ripple {
+        0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+        100% { transform: translate(-50%, -50%) scale(4); opacity: 0; }
+      }
+    \`;
+    document.head.appendChild(style);
+  }
+  
+  setTimeout(() => ripple.remove(), 600);
+}

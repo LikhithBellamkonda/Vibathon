@@ -35,11 +35,21 @@ stopBtn.onclick = async () => {
     updateUI('processing');
     try {
         const response = await chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
-        // After stopping, open the recorder page for analysis
+        if (response && response.events && response.events.length > 0) {
+            const aiResult = await chrome.runtime.sendMessage({ type: "ANALYZE_WORKFLOW", rawData: response.events });
+            if (aiResult && !aiResult.error) {
+                await chrome.storage.local.set({ vibathon_pending_analysis: aiResult });
+            } else {
+                showError(aiResult?.error || "Analysis failed");
+                updateUI('idle');
+                return;
+            }
+        }
         chrome.tabs.create({ url: chrome.runtime.getURL('recorder.html') });
         window.close();
     } catch (err) {
         console.error('Failed to stop recording:', err);
+        showError(err.message);
         updateUI('idle');
     }
 };
@@ -49,21 +59,36 @@ openDashboardBtn.onclick = () => {
     window.close();
 };
 
+function showError(msg) {
+    const errorBox = document.getElementById('errorBox');
+    if (errorBox) {
+        errorBox.textContent = msg;
+        errorBox.style.display = 'block';
+    }
+}
+
 function updateUI(state) {
+    const loader = document.getElementById('loader');
+    const errorBox = document.getElementById('errorBox');
+    if (errorBox) errorBox.style.display = 'none';
+
     if (state === 'recording') {
         statusEl.innerText = 'Recording Active';
         statusIndicator.className = 'status-dot recording';
         startBtn.style.display = 'none';
         stopBtn.style.display = 'flex';
+        loader.style.display = 'none';
     } else if (state === 'processing') {
         statusEl.innerText = 'Processing...';
         statusIndicator.className = 'status-dot active';
         startBtn.style.display = 'none';
         stopBtn.style.display = 'none';
+        loader.style.display = 'block';
     } else {
         statusEl.innerText = 'System Ready';
         statusIndicator.className = 'status-dot active';
         startBtn.style.display = 'flex';
         stopBtn.style.display = 'none';
+        loader.style.display = 'none';
     }
 }

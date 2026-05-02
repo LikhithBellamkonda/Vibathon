@@ -6,12 +6,14 @@
   "permissions": ["storage", "scripting", "activeTab", "tabs", "alarms"],
   "host_permissions": ["<all_urls>"],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "action": {
     "default_title": "Open Vibathon AI",
     "default_popup": "popup.html"
   },
+  "options_page": "options.html",
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
@@ -21,7 +23,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["recorder.html", "recorder.css", "recorder.js", "content.js"],
+      "resources": ["recorder.html", "recorder.css", "recorder.js"],
       "matches": ["<all_urls>"]
     }
   ]

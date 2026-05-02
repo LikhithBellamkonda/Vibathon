@@ -167,6 +167,25 @@ function getStartUrl() {
 
 async function checkInitialStatus() {
     try {
+        const pending = await chrome.storage.local.get('vibathon_pending_analysis');
+        if (pending.vibathon_pending_analysis) {
+            const res = pending.vibathon_pending_analysis;
+            currentSteps = res.steps || [];
+            currentThinking = res.thinking || '';
+            currentSummary = res.summary || '';
+            
+            // Get the raw events from session state so we can show the feed too
+            const state = await chrome.runtime.sendMessage({ type: "GET_RECORDING" });
+            if (state && state.events) currentEvents = state.events;
+            
+            updateUI('idle');
+            updateEventsUI();
+            renderVisualFlowchart();
+            
+            await chrome.storage.local.remove('vibathon_pending_analysis');
+            return;
+        }
+
         const res = await chrome.runtime.sendMessage({ type: "GET_RECORDING" });
         if (res) {
             currentEvents = res.events || [];
