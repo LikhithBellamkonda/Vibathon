@@ -125,23 +125,26 @@ function setupButtonHandlers() {
 
     if (saveWorkflowBtn) {
         saveWorkflowBtn.onclick = async () => {
+            const name = workflowNameInput.value || 'Untitled Workflow';
             const workflow = {
-                name: workflowNameInput.value,
+                id: editingWorkflowId || Date.now(),
+                name,
                 steps: currentSteps,
                 thinking: currentThinking,
                 summary: currentSummary,
-                createdAt: Date.now(),
+                createdAt: new Date().toISOString(),
                 startUrl: getStartUrl(),
                 requiresFaceAuth: isSecuredWorkflow
             };
+
             if (editingWorkflowId) {
-                workflow.id = editingWorkflowId;
                 await chrome.runtime.sendMessage({ type: "UPDATE_WORKFLOW", workflow });
                 alert("Workflow updated!");
             } else {
                 await chrome.runtime.sendMessage({ type: "SAVE_WORKFLOW", workflow });
-                alert("Workflow saved!");
+                alert("Workflow saved to library!");
             }
+            loadHistory();
         };
     }
 
@@ -192,6 +195,30 @@ function setupButtonHandlers() {
             } finally {
                 generatePromptBtn.style.display = 'block';
                 promptLoading.style.display = 'none';
+            }
+        };
+    }
+
+    // JSON to Flowchart Converter
+    const convertJsonBtn = document.getElementById('convertJsonBtn');
+    if (convertJsonBtn) {
+        convertJsonBtn.onclick = () => {
+            const promptInput = document.getElementById('aiPromptInput');
+            try {
+                const workflow = JSON.parse(promptInput.value);
+                if (!workflow.steps) throw new Error("Invalid format: missing steps array");
+                
+                currentSteps = workflow.steps;
+                currentThinking = workflow.thinking || 'Manually imported JSON';
+                currentSummary = workflow.summary || 'Converted from JSON string';
+                workflowNameInput.value = workflow.name || 'Imported JSON';
+                editingWorkflowId = null;
+                
+                switchView('dashboard');
+                renderVisualFlowchart();
+                showToast("JSON converted to flowchart!");
+            } catch (err) {
+                alert("Failed to convert JSON: " + err.message);
             }
         };
     }
@@ -541,17 +568,23 @@ function createFlowNode(step, index) {
         body.appendChild(selInfo);
     }
 
-    if (step.action === 'type') {
+    if (['type', 'select', 'scroll'].includes(step.action)) {
         const valLabel = document.createElement('label');
-        valLabel.textContent = step.isSensitive ? '🔒 Password (Encrypted)' : 'Text to type';
+        if (step.action === 'type') valLabel.textContent = step.isSensitive ? '🔒 Password (Encrypted)' : 'Text to type';
+        else if (step.action === 'select') valLabel.textContent = 'Option Value';
+        else if (step.action === 'scroll') valLabel.textContent = 'Scroll Amount (px)';
+        
         body.appendChild(valLabel);
         const valInput = document.createElement('input');
-        valInput.type = step.isSensitive ? 'password' : 'text';
+        valInput.type = (step.action === 'type' && step.isSensitive) ? 'password' : (step.action === 'scroll' ? 'number' : 'text');
         valInput.value = step.value || '';
-        valInput.placeholder = step.isSensitive ? 'Encrypted — will be decrypted at runtime' : 'Text value';
-        valInput.onchange = () => { currentSteps[index].value = valInput.value; };
+        valInput.placeholder = step.action === 'scroll' ? '300' : 'Value';
+        valInput.onchange = () => { 
+            currentSteps[index].value = step.action === 'scroll' ? parseInt(valInput.value) : valInput.value; 
+        };
         body.appendChild(valInput);
-        if (step.isSensitive) {
+        
+        if (step.action === 'type' && step.isSensitive) {
             const encBadge = document.createElement('div');
             encBadge.style.cssText = 'margin-top:4px;font-size:0.72rem;color:var(--success);';
             encBadge.textContent = '🔐 AES-256-GCM encrypted';
