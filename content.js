@@ -1,6 +1,7 @@
 // Vibathon Playwright-Level DOM Automation Engine (v3.0)
 // Fully working multi-step automation with cross-page navigation
 
+(function() {
 if (window.__vibathon_injected) return;
 window.__vibathon_injected = true;
 
@@ -655,3 +656,5 @@ function createClickRipple(el) {
   
   setTimeout(() => ripple.remove(), 600);
 }
+
+})();
