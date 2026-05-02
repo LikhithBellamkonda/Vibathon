@@ -3,7 +3,7 @@
   "name": "Vibathon AI — Workflow Automation",
   "version": "3.0",
   "description": "Record, edit, and automate browser workflows with AI. Features visual flowchart editor, AES-256 encryption, and face recognition.",
-  "permissions": ["storage", "scripting", "activeTab", "tabs", "alarms"],
+  "permissions": ["storage", "scripting", "activeTab", "tabs", "alarms", "webNavigation"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
