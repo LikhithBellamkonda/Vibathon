@@ -70,8 +70,8 @@ function switchView(viewName) {
 // ===== INIT =====
 document.addEventListener('DOMContentLoaded', async () => {
     initNavigation();
-    chrome.storage.local.get(['gemini_api_key'], (data) => {
-        if (data.gemini_api_key && apiKeyInput) apiKeyInput.value = data.gemini_api_key;
+    chrome.storage.local.get(['apiKey'], (data) => {
+        if (data.apiKey && apiKeyInput) apiKeyInput.value = data.apiKey;
     });
     setupButtonHandlers();
     setupFaceRecognition();
@@ -83,7 +83,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 function setupButtonHandlers() {
     if (saveApiBtn) {
         saveApiBtn.onclick = () => {
-            chrome.storage.local.set({ gemini_api_key: apiKeyInput.value }, () => {
+            chrome.storage.local.set({ apiKey: apiKeyInput.value }, () => {
                 alert("API Key saved!");
             });
         };
