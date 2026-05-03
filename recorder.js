@@ -322,15 +322,33 @@ function setupButtonHandlers() {
 
 async function loginWithGoogle() {
     try {
-        chrome.identity.getAuthToken({ interactive: true }, async (token) => {
-            if (chrome.runtime.lastError || !token) {
-                console.error("Login failed:", chrome.runtime.lastError);
+        console.log("Starting Google Login...");
+        showToast("Opening Google Login...", "info");
+        
+        chrome.identity.getAuthToken({ interactive: true }, (token) => {
+            if (chrome.runtime.lastError) {
+                const errMsg = chrome.runtime.lastError.message;
+                console.error("Login failed:", errMsg);
+                showToast(`Login Failed: ${errMsg}`, "error");
+                
+                if (errMsg.includes("OAuth2 client configuration")) {
+                    alert("OAuth Configuration Error: Please ensure your Extension ID is added to the Authorized Origins in Google Cloud Console.");
+                }
                 return;
             }
+            
+            if (!token) {
+                console.error("No token received");
+                showToast("Login failed: No token received", "error");
+                return;
+            }
+            
+            console.log("Token received, fetching profile...");
             fetchUserProfile(token);
         });
     } catch (err) {
-        console.error("Auth error:", err);
+        console.error("Auth Exception:", err);
+        showToast("Authentication Error", "error");
     }
 }
 
