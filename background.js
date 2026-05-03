@@ -51,7 +51,7 @@ let recordedEvents = [];
 let isRecording = false;
 let automationProgress = null;
 
-console.log('Vibathon Background SW v3.0 Initialized');
+console.log('Workflow Learner Background SW v3.0 Initialized');
 
 // ============ KEEP ALIVE ============
 chrome.runtime.onInstalled.addListener(() => {

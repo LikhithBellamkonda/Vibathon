@@ -1,8 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Vibathon AI — Workflow Automation",
+  "name": "Workflow Learner",
   "version": "3.0",
   "description": "Record, edit, and automate browser workflows with AI. Features visual flowchart editor, AES-256 encryption, and face recognition.",
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
   "permissions": ["storage", "scripting", "activeTab", "tabs", "alarms", "webNavigation", "identity"],
   "oauth2": {
     "client_id": "765221480317-ki2khpjrkn7kt6oduaudsl8i336okrls.apps.googleusercontent.com",
