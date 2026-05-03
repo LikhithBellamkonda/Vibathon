@@ -5,7 +5,7 @@
   "description": "Record, edit, and automate browser workflows with AI. Features visual flowchart editor, AES-256 encryption, and face recognition.",
   "permissions": ["storage", "scripting", "activeTab", "tabs", "alarms", "webNavigation", "identity"],
   "oauth2": {
-    "client_id": "713437158732-fkb6r0qjr8q8g7v6p5e8u7k7k7k7k7k7.apps.googleusercontent.com",
+    "client_id": "765221480317-ki2khpjrkn7kt6oduaudsl8i336okrls.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/userinfo.email",
       "https://www.googleapis.com/auth/userinfo.profile"
