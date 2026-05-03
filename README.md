@@ -191,4 +191,4 @@ MIT License — Free for personal and commercial use.
 
 ---
 
-**Built with ❤️ for Vibathon**
+**Built with ❤️ for everyone**
