@@ -307,7 +307,84 @@ function setupButtonHandlers() {
             }
         };
     }
+    const googleLoginBtn = document.getElementById('googleLoginBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (googleLoginBtn) {
+        googleLoginBtn.onclick = () => loginWithGoogle();
+    }
+    if (logoutBtn) {
+        logoutBtn.onclick = () => logout();
+    }
+
+    // Check login status on start
+    checkLoginStatus();
 }
+
+async function loginWithGoogle() {
+    try {
+        chrome.identity.getAuthToken({ interactive: true }, async (token) => {
+            if (chrome.runtime.lastError || !token) {
+                console.error("Login failed:", chrome.runtime.lastError);
+                return;
+            }
+            fetchUserProfile(token);
+        });
+    } catch (err) {
+        console.error("Auth error:", err);
+    }
+}
+
+async function logout() {
+    chrome.identity.getAuthToken({ interactive: false }, (token) => {
+        if (token) {
+            chrome.identity.removeCachedAuthToken({ token }, () => {
+                const url = `https://accounts.google.com/o/oauth2/revoke?token=${token}`;
+                fetch(url);
+                updateLoginUI(null);
+                showToast("Logged out successfully");
+            });
+        }
+    });
+}
+
+function checkLoginStatus() {
+    chrome.identity.getAuthToken({ interactive: false }, (token) => {
+        if (token) fetchUserProfile(token);
+    });
+}
+
+async function fetchUserProfile(token) {
+    try {
+        const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        const profile = await res.json();
+        updateLoginUI(profile);
+    } catch (err) {
+        console.error("Profile fetch failed:", err);
+    }
+}
+
+function updateLoginUI(profile) {
+    const loggedOutState = document.getElementById('loggedOutState');
+    const loggedInState = document.getElementById('loggedInState');
+    const userAvatar = document.getElementById('userAvatar');
+    const userName = document.getElementById('userName');
+    const userEmail = document.getElementById('userEmail');
+
+    if (profile) {
+        loggedOutState.style.display = 'none';
+        loggedInState.style.display = 'flex';
+        userAvatar.src = profile.picture;
+        userName.textContent = profile.name;
+        userEmail.textContent = profile.email;
+        showToast(`Welcome back, ${profile.given_name}!`);
+    } else {
+        loggedOutState.style.display = 'block';
+        loggedInState.style.display = 'none';
+    }
+}
+
 
 function getStartUrl() {
     if (currentSteps.length > 0 && currentSteps[0].action === 'navigate') return currentSteps[0].url;
